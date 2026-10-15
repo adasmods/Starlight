@@ -1,0 +1,12 @@
+{
+	"geode": "5.11.1",
+	"gd": {
+		"win": "2.2081"
+	},
+	"id": "piotrek.starlight",
+	"name": "Starlight",
+	"version": "v0.1.0",
+	"developer": "Piotrek",
+	"description": "Kosmiczne mod menu z animacjami, hackami i wizualami (orby, skyboxy).",
+	"tags": ["cheat", "interface", "offline"]
+}
