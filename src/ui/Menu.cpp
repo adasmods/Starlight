@@ -39,6 +39,7 @@ bool s_nickBufInit = false;
 
 ImFont* s_fontRegular = nullptr;
 ImFont* s_fontBold = nullptr;
+ImFont* s_fontHeavy = nullptr;
 
 float s_appliedScale = -1.f;
 float s_appliedAccent[3] = {-1.f, -1.f, -1.f};
@@ -770,10 +771,38 @@ void drawLogo(float g) {
     sparkle(dl, {startX - 24.f * s, y + size * 0.5f}, (8.f + 3.f * tw) * s, u32(withA(kWhite, 0.85f * g)));
     sparkle(dl, {x + 16.f * s, y + size * 0.5f}, (8.f + 3.f * (1.f - tw)) * s, u32(withA(kWhite, 0.85f * g)));
 
-    auto sub = fmt::format("cosmic mod menu   -   press {} to close", keyName(cfg().menuKey));
-    float subSize = 14.f * s;
-    ImVec2 ss = textSize(regularFont(), subSize, sub.c_str());
-    dl->AddText(regularFont(), subSize, {(ds.x - ss.x) * 0.5f, y + size + 4.f * s}, u32(withA(kTextDim, 0.9f * g)), sub.c_str());
+    // subtitle: "created by adasmods  ·  press Tab to close"
+    ImFont* subFont = s_fontHeavy ? s_fontHeavy : boldFont();
+    float subSize = 17.f * s;
+    std::string hint = fmt::format("press {} to close", keyName(cfg().menuKey));
+    char const* by = "created by ";
+    char const* author = "adasmods";
+    float dotGap = 14.f * s;
+    float wBy = textSize(subFont, subSize, by).x;
+    float wAuthor = textSize(subFont, subSize, author).x;
+    float wHint = textSize(subFont, subSize * 0.85f, hint.c_str()).x;
+    float subW = wBy + wAuthor + dotGap * 2.f + wHint;
+    float sx = (ds.x - subW) * 0.5f;
+    float sy = y + size + 5.f * s;
+
+    ImVec4 soft{0.80f, 0.74f, 0.95f, 1.f};
+    dl->AddText(subFont, subSize, {sx, sy}, u32(withA(soft, 0.9f * g)), by);
+    sx += wBy;
+
+    // author name: shimmering accent with a soft glow
+    ImVec4 nameCol = mix(mix(accent(), kWhite, 0.45f), {0.65f, 0.8f, 1.f, 1.f}, 0.5f + 0.5f * std::sin(t * 1.8f));
+    for (int d = 0; d < 8; d++) {
+        float ang = d * kPi / 4.f;
+        ImVec2 off{std::cos(ang) * 1.8f * s, std::sin(ang) * 1.8f * s};
+        dl->AddText(subFont, subSize, ImVec2{sx, sy} + off, u32(accent(0.16f * g)), author);
+    }
+    dl->AddText(subFont, subSize, {sx, sy}, u32(withA(nameCol, g)), author);
+    sx += wAuthor + dotGap;
+
+    float midY = sy + subSize * 0.55f;
+    dl->AddCircleFilled({sx, midY}, 2.2f * s, u32(accent(0.9f * g)), 12);
+    sx += dotGap;
+    dl->AddText(subFont, subSize * 0.85f, {sx, sy + subSize * 0.08f}, u32(withA(kTextDim, 0.85f * g)), hint.c_str());
 }
 
 // ============================================================================
@@ -1131,6 +1160,9 @@ void setup() {
     s_fontBold = tryFont("C:\\Windows\\Fonts\\seguisb.ttf", 17.f);
     if (!s_fontBold) s_fontBold = tryFont("C:\\Windows\\Fonts\\segoeuib.ttf", 17.f);
     if (!s_fontBold) s_fontBold = s_fontRegular;
+    // thicker, rounder font for the logo subtitle
+    s_fontHeavy = tryFont("C:\\Windows\\Fonts\\segoeuib.ttf", 17.f);
+    if (!s_fontHeavy) s_fontHeavy = s_fontBold;
     io.FontDefault = s_fontRegular;
 
     s_appliedScale = -1.f; // force theme re-apply
