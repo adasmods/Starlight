@@ -19,13 +19,17 @@ namespace starlight {
 
 namespace {
 
+// Smooth system font used by the Starlight Theme (rendered with CCLabelTTF).
+constexpr char const* kThemeFont = "Candara";
+constexpr float kThemeFontSize = 40.f; // render size; scaled down for crisp text
+
 struct FontList {
     std::vector<std::string> names;
     std::vector<std::string> files;
     std::vector<char const*> namePtrs;
 
     FontList() {
-        add("Starlight Theme", "chatFont.fnt");
+        add("Starlight Theme", "");
         add("Big Font", "bigFont.fnt");
         add("Chat Font", "chatFont.fnt");
         add("Gold Font", "goldFont.fnt");
@@ -46,7 +50,7 @@ FontList const& fonts() {
 // rough per-font size correction so every font looks similar at scale 1
 float fontBaseScale(int font) {
     switch (font) {
-        case 0: return 0.62f; // Starlight Theme (chat font)
+        case 0: return 0.36f; // Starlight Theme (TTF rendered at kThemeFontSize)
         case 1: return 0.40f; // big font
         case 2: return 0.60f; // chat font
         case 3: return 0.45f; // gold font
@@ -57,6 +61,8 @@ float fontBaseScale(int font) {
 constexpr ccColor3B kWhite{255, 255, 255};
 constexpr ccColor3B kRed{255, 70, 100};
 constexpr ccColor3B kGreen{90, 255, 150};
+constexpr ccColor3B kCream{255, 243, 226};
+constexpr ccColor3B kCreamPink{255, 228, 240};
 
 bool isWhite(ccColor3B c) { return c.r == 255 && c.g == 255 && c.b == 255; }
 
@@ -66,6 +72,12 @@ ccColor3B lerpC(ccColor3B a, ccColor3B b, float t) {
 }
 
 GLubyte toByte(float v) { return static_cast<GLubyte>(std::clamp(v, 0.f, 255.f)); }
+
+void setDiameter(CCSprite* spr, float w, float h) {
+    auto cs = spr->getContentSize();
+    spr->setScaleX(w / cs.width);
+    spr->setScaleY(h / cs.height);
+}
 
 LabelsNode* s_current = nullptr;
 
@@ -87,7 +99,7 @@ char const* labelName(int id) {
 }
 
 char const* sampleText(int id) {
-    static char const* samples[kLabelCount] = {".", "240 FPS", "8 CPS", "100.00%", "0 Deaths", "Attempt 1", "42.00%", "1:23", "21:37:00"};
+    static char const* samples[kLabelCount] = {"o", "240 FPS", "8 CPS", "100.00%", "0 Deaths", "Attempt 1", "42.00%", "1:23", "21:37:00"};
     return samples[std::clamp(id, 0, kLabelCount - 1)];
 }
 
@@ -118,29 +130,39 @@ LabelsNode* LabelsNode::current() { return s_current; }
 LabelsNode::~LabelsNode() {
     if (s_current == this) s_current = nullptr;
     if (m_glowTex) m_glowTex->release();
+    if (m_discTex) m_discTex->release();
 }
 
 bool LabelsNode::init() {
     if (!CCNode::init()) return false;
     m_glowTex = tex::glow(64);
     m_glowTex->retain();
+    m_discTex = tex::disc(64, false);
+    m_discTex->retain();
+
+    auto additiveSprite = [&](CCTexture2D* tex, CCNode* parent, int z) {
+        auto spr = CCSprite::createWithTexture(tex);
+        spr->setBlendFunc({GL_SRC_ALPHA, GL_ONE});
+        parent->addChild(spr, z);
+        return spr;
+    };
 
     for (int i = 0; i < kLabelCount; i++) {
         auto& e = m_entries[i];
         e.root = CCNode::create();
         this->addChild(e.root);
-
-        e.glow = CCSprite::createWithTexture(m_glowTex);
-        e.glow->setBlendFunc({GL_SRC_ALPHA, GL_ONE});
-        e.root->addChild(e.glow, 0);
-
-        e.sparkle = CCSprite::createWithTexture(m_glowTex);
-        e.sparkle->setBlendFunc({GL_SRC_ALPHA, GL_ONE});
-        e.sparkle->setColor({235, 220, 255});
-        e.root->addChild(e.sparkle, 2);
-
+        e.glow = additiveSprite(m_glowTex, e.root, 0);
+        e.sparkle = additiveSprite(m_glowTex, e.root, 4);
+        e.sparkle->setColor({255, 236, 250});
         e.phase = i * 0.9f;
     }
+
+    // cheat indicator: soft glow + round dot
+    auto& cheat = m_entries[LabelCheat];
+    cheat.dotGlow = additiveSprite(m_glowTex, cheat.root, 1);
+    cheat.dot = CCSprite::createWithTexture(m_discTex);
+    cheat.root->addChild(cheat.dot, 2);
+
     s_current = this;
     return true;
 }
@@ -149,6 +171,39 @@ bool LabelsNode::getWorldBox(int id, CCRect& out) const {
     if (id < 0 || id >= kLabelCount || !m_entries[id].hasBox) return false;
     out = m_entries[id].box;
     return true;
+}
+
+// creates/recreates the text node for the wanted font and sets the string
+void LabelsNode::ensureText(Entry& e, int font, std::string const& text) {
+    bool theme = font == 0;
+    if (font != e.font) {
+        if (e.bm) e.bm->removeFromParent();
+        if (e.ttf) e.ttf->removeFromParent();
+        if (e.halo) e.halo->removeFromParent();
+        e.bm = nullptr;
+        e.ttf = nullptr;
+        e.halo = nullptr;
+
+        if (theme) {
+            e.halo = CCLabelTTF::create(text.c_str(), kThemeFont, kThemeFontSize);
+            e.halo->setBlendFunc({GL_SRC_ALPHA, GL_ONE});
+            e.root->addChild(e.halo, 1);
+            e.ttf = CCLabelTTF::create(text.c_str(), kThemeFont, kThemeFontSize);
+            e.root->addChild(e.ttf, 2);
+        } else {
+            e.bm = CCLabelBMFont::create(text.c_str(), labels::fontFile(font));
+            if (!e.bm) e.bm = CCLabelBMFont::create(text.c_str(), "bigFont.fnt");
+            e.root->addChild(e.bm, 2);
+        }
+        e.font = font;
+        e.text = text;
+        return;
+    }
+    if (e.text == text) return;
+    e.text = text;
+    if (e.ttf) e.ttf->setString(text.c_str());
+    if (e.halo) e.halo->setString(text.c_str());
+    if (e.bm) e.bm->setString(text.c_str());
 }
 
 void LabelsNode::refresh(float dt, PlayLayer* pl) {
@@ -163,9 +218,13 @@ void LabelsNode::refresh(float dt, PlayLayer* pl) {
     std::array<ccColor3B, kLabelCount> colors;
     colors.fill(kWhite);
 
-    texts[LabelCheat] = ".";
     colors[LabelCheat] = (st.cheatedAttempt || cheatsActive()) ? kRed : kGreen;
-    texts[LabelFps] = fmt::format("{:.0f} FPS", st.fps);
+    m_fpsTimer -= dt;
+    if (m_fpsTimer <= 0.f) {
+        m_fpsTimer = 0.25f; // readable, and avoids re-rendering text every frame
+        m_fpsText = fmt::format("{:.0f} FPS", st.fps);
+    }
+    texts[LabelFps] = m_fpsText;
     {
         double now = nowSeconds();
         auto& clicks = st.clicks;
@@ -199,60 +258,81 @@ void LabelsNode::refresh(float dt, PlayLayer* pl) {
         if (!show) continue;
 
         int font = std::clamp(L.font >= 0 ? L.font : c.labelFont, 0, labels::fontCount() - 1);
-        auto const& text = texts[i];
-        if (font != e.font || !e.label) {
-            if (e.label) e.label->removeFromParent();
-            e.label = CCLabelBMFont::create(text.c_str(), labels::fontFile(font));
-            if (!e.label) e.label = CCLabelBMFont::create(text.c_str(), "bigFont.fnt");
-            e.root->addChild(e.label, 1);
-            e.font = font;
-            e.text = text;
-        } else if (e.text != text) {
-            e.label->setString(text.c_str());
-            e.text = text;
-        }
-
         bool theme = font == 0;
         float ax = L.align == 0 ? 0.f : L.align == 1 ? 0.5f : 1.f;
-        float scale = c.labelScale * L.scale * fontBaseScale(font) * (i == LabelCheat ? 1.8f : 1.f);
-        e.label->setAnchorPoint({ax, 0.5f});
-        e.label->setScale(scale);
 
         float bob = 0.f, breathe = 1.f;
-        ccColor3B col = colors[i];
         if (theme) {
-            // calm floating + slow purple shimmer
+            // calm floating + slow breathing glow
             bob = std::sin(m_time * 1.1f + e.phase) * 1.6f;
-            breathe = 0.82f + 0.18f * std::sin(m_time * 0.9f + e.phase * 1.3f);
-            if (isWhite(col)) col = lerpC({214, 190, 255}, {168, 120, 255}, 0.5f + 0.5f * std::sin(m_time * 0.7f + e.phase));
+            breathe = 0.85f + 0.15f * std::sin(m_time * 0.9f + e.phase * 1.3f);
+        }
+        e.root->setPosition({L.x * win.width, L.y * win.height + bob});
+
+        // ---- cheat indicator: a glowing circle, no text
+        if (i == LabelCheat) {
+            float d = 7.f * c.labelScale * L.scale;
+            ccColor3B col = colors[i];
+            float cx = (0.5f - ax) * d;
+            e.dot->setPosition({cx, 0.f});
+            setDiameter(e.dot, d, d);
+            e.dot->setColor(col);
+            e.dot->setOpacity(toByte(opacity * 255.f));
+            e.dotGlow->setPosition({cx, 0.f});
+            setDiameter(e.dotGlow, d * 3.2f, d * 3.2f);
+            e.dotGlow->setColor(col);
+            e.dotGlow->setOpacity(toByte(opacity * 120.f * breathe));
+            e.glow->setVisible(false);
+            e.sparkle->setVisible(false);
+
+            CCPoint a = e.root->convertToWorldSpace({cx - d * 0.5f, -d * 0.5f});
+            CCPoint b = e.root->convertToWorldSpace({cx + d * 0.5f, d * 0.5f});
+            e.box = CCRect(a.x, a.y, b.x - a.x, b.y - a.y);
+            e.hasBox = true;
+            continue;
         }
 
-        e.root->setPosition({L.x * win.width, L.y * win.height + bob});
-        e.label->setColor(col);
-        e.label->setOpacity(toByte(opacity * 255.f * breathe));
+        ensureText(e, font, texts[i]);
+        CCNode* textNode = theme ? static_cast<CCNode*>(e.ttf) : static_cast<CCNode*>(e.bm);
+        float scale = c.labelScale * L.scale * fontBaseScale(font);
+        textNode->setAnchorPoint({ax, 0.5f});
+        textNode->setScale(scale);
 
-        float w = e.label->getContentSize().width * scale;
-        float h = e.label->getContentSize().height * scale;
+        float w = textNode->getContentSize().width * scale;
+        float h = textNode->getContentSize().height * scale;
         float cx = (0.5f - ax) * w;
 
         e.glow->setVisible(theme);
         e.sparkle->setVisible(theme);
         if (theme) {
-            auto gs = e.glow->getContentSize();
+            // creamy text with a gentle shimmer (keeps warning colors like red)
+            ccColor3B col = isWhite(colors[i]) ? lerpC(kCream, kCreamPink, 0.5f + 0.5f * std::sin(m_time * 0.6f + e.phase)) : colors[i];
+            e.ttf->setColor(col);
+            e.ttf->setOpacity(toByte(opacity * 255.f));
+
+            // illuminated: slightly larger additive copy + soft purple glow behind
+            e.halo->setAnchorPoint({ax, 0.5f});
+            e.halo->setScale(scale * 1.045f);
+            e.halo->setPosition({(ax - 0.5f) * w * 0.045f, 0.f});
+            e.halo->setColor({200, 140, 255});
+            e.halo->setOpacity(toByte(opacity * 110.f * breathe));
+
             e.glow->setPosition({cx, 0.f});
-            e.glow->setScaleX((w * 1.35f + 18.f) / gs.width);
-            e.glow->setScaleY((h * 1.9f + 8.f) / gs.height);
-            e.glow->setColor(i == LabelCheat ? col : ccColor3B{150, 90, 255});
-            e.glow->setOpacity(toByte(opacity * 75.f * breathe));
+            setDiameter(e.glow, w * 1.3f + 20.f, h * 1.6f + 10.f);
+            e.glow->setColor({150, 90, 255});
+            e.glow->setOpacity(toByte(opacity * 85.f * breathe));
 
             float tw = std::pow(std::max(0.f, std::sin(m_time * 1.6f + e.phase * 2.f)), 6.f);
-            e.sparkle->setPosition({cx + w * 0.5f + 3.f, h * 0.35f});
-            e.sparkle->setScale((5.f + 3.f * tw) / e.sparkle->getContentSize().width);
+            e.sparkle->setPosition({cx + w * 0.5f + 4.f, h * 0.3f});
+            setDiameter(e.sparkle, 5.f + 3.f * tw, 5.f + 3.f * tw);
             e.sparkle->setOpacity(toByte(opacity * 255.f * tw));
+        } else {
+            e.bm->setColor(colors[i]);
+            e.bm->setOpacity(toByte(opacity * 255.f));
         }
 
         // screen-space box for the label editor
-        CCRect bb = e.label->boundingBox();
+        CCRect bb = textNode->boundingBox();
         CCPoint a = e.root->convertToWorldSpace(bb.origin);
         CCPoint b = e.root->convertToWorldSpace({bb.getMaxX(), bb.getMaxY()});
         e.box = CCRect(a.x, a.y, b.x - a.x, b.y - a.y);

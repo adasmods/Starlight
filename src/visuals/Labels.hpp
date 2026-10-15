@@ -42,9 +42,14 @@ protected:
 private:
     struct Entry {
         cocos2d::CCNode* root = nullptr;
-        cocos2d::CCLabelBMFont* label = nullptr;
+        // exactly one of these text nodes exists at a time
+        cocos2d::CCLabelBMFont* bm = nullptr; // GD bitmap fonts
+        cocos2d::CCLabelTTF* ttf = nullptr;   // Starlight Theme (smooth system font)
+        cocos2d::CCLabelTTF* halo = nullptr;  // Starlight Theme glow copy
         cocos2d::CCSprite* glow = nullptr;
         cocos2d::CCSprite* sparkle = nullptr;
+        cocos2d::CCSprite* dot = nullptr;     // cheat indicator circle
+        cocos2d::CCSprite* dotGlow = nullptr;
         int font = -1;
         std::string text;
         float phase = 0.f;
@@ -52,9 +57,14 @@ private:
         cocos2d::CCRect box;
     };
 
+    void ensureText(Entry& e, int font, std::string const& text);
+
     std::array<Entry, kLabelCount> m_entries;
     cocos2d::CCTexture2D* m_glowTex = nullptr;
+    cocos2d::CCTexture2D* m_discTex = nullptr;
     float m_time = 0.f;
+    float m_fpsTimer = 0.f;
+    std::string m_fpsText = "0 FPS";
 };
 
 } // namespace starlight

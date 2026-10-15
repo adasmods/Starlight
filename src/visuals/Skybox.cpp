@@ -30,7 +30,7 @@ SkyPreset const& preset(int id) {
     static SkyPreset const presets[] = {
         // 1: starry night
         {{{3, 2, 12}, {8, 8, 34}, {20, 16, 60}, {44, 26, 88}}, 170, 1.f, 1,
-         {236, 236, 255}, {130, 150, 255}, {0.82f, 0.78f}, 46.f,
+         {255, 253, 248}, {150, 165, 230}, {0.82f, 0.78f}, 50.f,
          {{90, 45, 170}, {35, 65, 170}}, 30, {120, 70, 200}, 70},
         // 2: evening sunset
         {{{18, 10, 46}, {58, 26, 98}, {150, 52, 112}, {238, 112, 90}, {255, 184, 112}}, 70, 0.45f, 2,
@@ -162,23 +162,22 @@ void SkyboxNode::rebuild() {
         m_celestialGlow = CCSprite::createWithTexture(m_glowTex);
         additive(m_celestialGlow);
         m_celestialGlow->setColor(p.celGlow);
-        m_glowBase = p.celestial == 2 ? 220.f : 150.f;
+        m_glowBase = p.celestial == 2 ? 220.f : 105.f;
         m_celestialGlow->setOpacity(static_cast<GLubyte>(m_glowBase));
-        setDiameter(m_celestialGlow, p.celSize * (p.celestial == 2 ? 6.f : 4.5f));
+        setDiameter(m_celestialGlow, p.celSize * (p.celestial == 2 ? 6.f : 5.f));
         m_celestialGlow->setPosition(pos);
         m_content->addChild(m_celestialGlow, 4);
 
-        if (p.celestial == 2) {
-            auto inner = CCSprite::createWithTexture(m_glowTex);
-            additive(inner);
-            inner->setColor({255, 200, 120});
-            inner->setOpacity(230);
-            setDiameter(inner, p.celSize * 2.2f);
-            inner->setPosition(pos);
-            m_content->addChild(inner, 5);
-        }
+        // tight bright halo (warm for the sun, moonlight-white for the moon)
+        auto inner = CCSprite::createWithTexture(m_glowTex);
+        additive(inner);
+        inner->setColor(p.celestial == 2 ? ccColor3B{255, 200, 120} : ccColor3B{235, 235, 245});
+        inner->setOpacity(p.celestial == 2 ? 230 : 70);
+        setDiameter(inner, p.celSize * (p.celestial == 2 ? 2.2f : 1.7f));
+        inner->setPosition(pos);
+        m_content->addChild(inner, 5);
 
-        m_celestial = CCSprite::createWithTexture(tex::disc(128, p.celestial == 1));
+        m_celestial = CCSprite::createWithTexture(p.celestial == 1 ? tex::moon(256) : tex::disc(128, false));
         m_celestial->setColor(p.celColor);
         setDiameter(m_celestial, p.celSize);
         m_celestial->setPosition(pos);

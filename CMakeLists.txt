@@ -22,5 +22,9 @@ add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 # ImGui renderer for Cocos2d (bundles ImGui v1.92.x)
 CPMAddPackage("gh:matcool/gd-imgui-cocos#b93f08ccef778a53ebba09b20c347f6a63980119")
 target_link_libraries(${PROJECT_NAME} imgui-cocos)
+if (WIN32)
+    # raw GL calls for the cosmic trail strip
+    target_link_libraries(${PROJECT_NAME} opengl32)
+endif()
 
 setup_geode_mod(${PROJECT_NAME})

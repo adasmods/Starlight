@@ -43,6 +43,8 @@ static void visit(Config& c, F&& f) {
     f("respawn-delay", c.respawnDelay);
     f("nick-changer", c.nickChanger);
     f("nick", c.nick);
+    f("cosmic-profile", c.cosmicProfile);
+    f("uid", c.uid);
 
     f("unlock-icons", c.unlockIcons);
     f("practice-music", c.practiceMusic);

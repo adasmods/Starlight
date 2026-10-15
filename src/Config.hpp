@@ -59,6 +59,8 @@ struct Config {
     float respawnDelay = 0.5f;
     bool nickChanger = false;
     std::string nick = "StarLight Team";
+    bool cosmicProfile = true; // gradient name + "S" badge + UID on your profile
+    std::string uid = "000";
 
     // ---- Bypass
     bool unlockIcons = false;

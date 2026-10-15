@@ -36,6 +36,8 @@ bool s_layoutReady = false;
 bool s_editLabels = false;
 char s_nickBuf[64] = "";
 bool s_nickBufInit = false;
+char s_uidBuf[32] = "";
+bool s_uidBufInit = false;
 
 ImFont* s_fontRegular = nullptr;
 ImFont* s_fontBold = nullptr;
@@ -239,7 +241,7 @@ struct PanelDef {
 };
 
 constexpr PanelDef kPanels[] = {
-    {"global", "Global", 5},   {"level", "Level", 6},         {"player", "Player", 6},
+    {"global", "Global", 5},   {"level", "Level", 6},         {"player", "Player", 7},
     {"bypass", "Bypass", 4},   {"visuals", "Visuals", 14},    {"labels", "Labels", 14},
     {"keybinds", "Keybinds", 8}, {"interface", "Interface", 9}, {"shortcuts", "Shortcuts", 5},
 };
@@ -863,6 +865,16 @@ void panelPlayer(int idx) {
             ImGui::SetNextItemWidth(-FLT_MIN);
             if (ImGui::InputText("##nickinput", s_nickBuf, sizeof(s_nickBuf))) c.nick = s_nickBuf;
             smallLabel("Reopen a page to see the change.");
+        });
+        toggle("Cosmic Profile", &c.cosmicProfile, "Gradient name, \"S\" badge and UID on your own profile.", "##cprofile");
+        options("##cprofile", [&] {
+            if (!s_uidBufInit) {
+                std::strncpy(s_uidBuf, c.uid.c_str(), sizeof(s_uidBuf) - 1);
+                s_uidBufInit = true;
+            }
+            smallLabel("UID");
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::InputText("##uidinput", s_uidBuf, sizeof(s_uidBuf))) c.uid = s_uidBuf;
         });
     }
 }
