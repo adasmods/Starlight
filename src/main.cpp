@@ -27,21 +27,51 @@ $on_mod(Loaded) {
     ImGuiCocos::get().setVisible(false);
 }
 
-// Keyboard: menu toggle, keybind capture, noclip key.
+// Custom jump / platformer keys -> GJBaseGameLayer::handleButton.
+// Returns true if the key is bound and was handled.
+static bool handleGameBind(int key, KeyboardInputData::Action action) {
+    auto& c = cfg();
+    int button = 0;
+    bool player1 = true;
+    for (int k : c.jumpKeys) {
+        if (k != 0 && k == key) button = 1;
+    }
+    if (!button && c.p2JumpKey != 0 && key == c.p2JumpKey) {
+        button = 1;
+        player1 = false;
+    }
+    if (!button && c.leftKey != 0 && key == c.leftKey) button = 2;
+    if (!button && c.rightKey != 0 && key == c.rightKey) button = 3;
+    if (!button) return false;
+
+    auto pl = PlayLayer::get();
+    if (!pl) return false;
+    // let the key through to the pause menu
+    if (auto scene = CCDirector::get()->getRunningScene(); scene && scene->getChildByType<PauseLayer>(0)) return false;
+
+    if (action == KeyboardInputData::Action::Repeat) return true;
+    pl->handleButton(action == KeyboardInputData::Action::Press, button, player1);
+    return true;
+}
+
+// Keyboard: menu toggle, keybind capture, noclip key, custom jump keys.
 // Priority -10 so we see keys before imgui-cocos swallows them.
 $execute {
     KeyboardInputEvent()
         .listen(
             [](KeyboardInputData& evt) -> bool {
-                if (evt.action != KeyboardInputData::Action::Press) return ListenerResult::Propagate;
                 int key = static_cast<int>(evt.key);
+                bool press = evt.action == KeyboardInputData::Action::Press;
 
-                if (menu::isOpen() && menu::captureKey(key)) return ListenerResult::Stop;
+                if (press && menu::isOpen() && menu::captureKey(key)) return ListenerResult::Stop;
 
                 // don't steal keys while typing in an imgui text field
                 if (ImGuiCocos::get().isInitialized() && ImGuiCocos::get().isVisible() && ImGui::GetIO().WantTextInput) {
                     return ListenerResult::Propagate;
                 }
+
+                if (handleGameBind(key, evt.action)) return ListenerResult::Stop;
+                if (!press) return ListenerResult::Propagate;
 
                 auto& c = cfg();
                 if (c.menuKey != 0 && key == c.menuKey) {

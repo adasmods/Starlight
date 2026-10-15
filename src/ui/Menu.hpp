@@ -13,4 +13,7 @@ bool isOpen();
 // If a keybind button is waiting for a key, consumes it and returns true.
 bool captureKey(int key);
 
+// True while the drag-to-position label editor is open.
+bool isEditingLabels();
+
 } // namespace starlight::menu

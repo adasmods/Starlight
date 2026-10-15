@@ -41,6 +41,8 @@ static void visit(Config& c, F&& f) {
     f("no-wave-trail", c.noWaveTrail);
     f("custom-respawn", c.customRespawn);
     f("respawn-delay", c.respawnDelay);
+    f("nick-changer", c.nickChanger);
+    f("nick", c.nick);
 
     f("unlock-icons", c.unlockIcons);
     f("practice-music", c.practiceMusic);
@@ -56,6 +58,14 @@ static void visit(Config& c, F&& f) {
     f("orb-color-1", c.orbColor1);
     f("orb-color-2", c.orbColor2);
     f("player-aura", c.playerAura);
+    f("cosmic-trail", c.cosmicTrail);
+    f("trail-width", c.trailWidth);
+    f("trail-length", c.trailLength);
+    f("trail-color-a", c.trailColorA);
+    f("trail-color-b", c.trailColorB);
+    f("trail-color-c", c.trailColorC);
+    f("trail-sparkles", c.trailSparkles);
+    f("trail-animate", c.trailAnimate);
     f("skybox", c.skybox);
     f("star-density", c.starDensity);
     f("shooting-stars", c.shootingStars);
@@ -63,18 +73,18 @@ static void visit(Config& c, F&& f) {
     f("hide-ground", c.hideGround);
 
     f("labels", c.labels);
-    f("label-corner", c.labelCorner);
-    f("label-scale", c.labelScale);
+    f("label-font", c.labelFont);
+    f("label-scale-v2", c.labelScale);
     f("label-opacity", c.labelOpacity);
-    f("lbl-cheat", c.lblCheat);
-    f("lbl-fps", c.lblFps);
-    f("lbl-cps", c.lblCps);
-    f("lbl-noclip-acc", c.lblNoclipAcc);
-    f("lbl-noclip-deaths", c.lblNoclipDeaths);
-    f("lbl-attempt", c.lblAttempt);
-    f("lbl-percent", c.lblPercent);
-    f("lbl-time", c.lblTime);
-    f("lbl-clock", c.lblClock);
+    for (int i = 0; i < kLabelCount; i++) {
+        auto& l = c.lbl[i];
+        f(fmt::format("label-{}-enabled", i), l.enabled);
+        f(fmt::format("label-{}-x", i), l.x);
+        f(fmt::format("label-{}-y", i), l.y);
+        f(fmt::format("label-{}-align", i), l.align);
+        f(fmt::format("label-{}-font", i), l.font);
+        f(fmt::format("label-{}-scale", i), l.scale);
+    }
 
     f("accent", c.accent);
     f("ui-scale", c.uiScale);
@@ -84,6 +94,10 @@ static void visit(Config& c, F&& f) {
 
     f("menu-key", c.menuKey);
     f("noclip-key", c.noclipKey);
+    f("jump-keys", c.jumpKeys);
+    f("p2-jump-key", c.p2JumpKey);
+    f("left-key", c.leftKey);
+    f("right-key", c.rightKey);
 }
 
 template <class T>
@@ -91,6 +105,7 @@ static void loadOne(std::string const& key, T& v) {
     auto mod = Mod::get();
     if (!mod->hasSavedValue(key)) return;
     if constexpr (std::is_same_v<T, bool>) v = mod->getSavedValue<bool>(key, v);
+    else if constexpr (std::is_same_v<T, std::string>) v = mod->getSavedValue<std::string>(key, v);
     else if constexpr (std::is_same_v<T, int>) v = mod->getSavedValue<int>(key, v);
     else v = static_cast<float>(mod->getSavedValue<double>(key, v));
 }
@@ -99,12 +114,13 @@ template <class T>
 static void saveOne(std::string const& key, T const& v) {
     auto mod = Mod::get();
     if constexpr (std::is_same_v<T, bool>) mod->setSavedValue<bool>(key, v);
+    else if constexpr (std::is_same_v<T, std::string>) mod->setSavedValue<std::string>(key, v);
     else if constexpr (std::is_same_v<T, int>) mod->setSavedValue<int>(key, v);
     else mod->setSavedValue<double>(key, static_cast<double>(v));
 }
 
 void loadConfig() {
-    visit(cfg(), [](char const* key, auto& v) {
+    visit(cfg(), [](std::string const& key, auto& v) {
         using T = std::remove_cvref_t<decltype(v)>;
         if constexpr (std::is_array_v<T>) {
             for (size_t i = 0; i < std::extent_v<T>; i++) loadOne(fmt::format("{}-{}", key, i), v[i]);
@@ -115,7 +131,7 @@ void loadConfig() {
 }
 
 void saveConfig() {
-    visit(cfg(), [](char const* key, auto& v) {
+    visit(cfg(), [](std::string const& key, auto& v) {
         using T = std::remove_cvref_t<decltype(v)>;
         if constexpr (std::is_array_v<T>) {
             for (size_t i = 0; i < std::extent_v<T>; i++) saveOne(fmt::format("{}-{}", key, i), v[i]);

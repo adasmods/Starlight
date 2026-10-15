@@ -13,6 +13,9 @@ struct State {
     int noclipDeadFrames = 0;
     int noclipDeaths = 0;
 
+    // a cheat was used during the current attempt
+    bool cheatedAttempt = false;
+
     // timing
     float fps = 0.f;
     double sessionTime = 0.0;

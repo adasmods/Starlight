@@ -2,6 +2,7 @@
 
 #include "Config.hpp"
 #include "State.hpp"
+#include "visuals/Labels.hpp"
 
 #include <Geode/Geode.hpp>
 #include <imgui-cocos.hpp>
@@ -32,6 +33,9 @@ int* s_capturing = nullptr; // keybind waiting for a key
 char s_search[64] = "";
 bool s_inPopup = false;
 bool s_layoutReady = false;
+bool s_editLabels = false;
+char s_nickBuf[64] = "";
+bool s_nickBufInit = false;
 
 ImFont* s_fontRegular = nullptr;
 ImFont* s_fontBold = nullptr;
@@ -234,9 +238,9 @@ struct PanelDef {
 };
 
 constexpr PanelDef kPanels[] = {
-    {"global", "Global", 5},     {"level", "Level", 6},         {"player", "Player", 5},
-    {"bypass", "Bypass", 4},     {"visuals", "Visuals", 13},    {"labels", "Labels", 10},
-    {"interface", "Interface", 14}, {"shortcuts", "Shortcuts", 5},
+    {"global", "Global", 5},   {"level", "Level", 6},         {"player", "Player", 6},
+    {"bypass", "Bypass", 4},   {"visuals", "Visuals", 14},    {"labels", "Labels", 14},
+    {"keybinds", "Keybinds", 8}, {"interface", "Interface", 9}, {"shortcuts", "Shortcuts", 5},
 };
 constexpr int kPanelCount = sizeof(kPanels) / sizeof(kPanels[0]);
 
@@ -565,11 +569,11 @@ bool colorRow(char const* label, float* col) {
     return r;
 }
 
-bool button(char const* label) {
+bool button(char const* label, float width = 0.f) {
     if (!matches(label)) return false;
     float s = S();
     ImVec2 p = ImGui::GetCursorScreenPos();
-    float w = ImGui::GetContentRegionAvail().x, h = 26.f * s;
+    float w = width > 0.f ? width : ImGui::GetContentRegionAvail().x, h = 26.f * s;
     bool pressed = ImGui::InvisibleButton(label, {w, h});
     bool hov = ImGui::IsItemHovered(), act = ImGui::IsItemActive();
     float& t = anim(ImGui::GetItemID(), 0.f);
@@ -820,6 +824,17 @@ void panelPlayer(int idx) {
         toggle("No Wave Trail", &c.noWaveTrail, "Hides the wave trail.");
         toggle("Respawn Delay", &c.customRespawn, "Custom time before respawning.", "##respawn");
         options("##respawn", [&] { sliderF("Delay", &c.respawnDelay, 0.f, 2.f, "%.2f s"); });
+        toggle("Nick Changer", &c.nickChanger, "Shows a custom name instead of yours. Visual only, nothing is sent to the servers.", "##nick");
+        options("##nick", [&] {
+            if (!s_nickBufInit) {
+                std::strncpy(s_nickBuf, c.nick.c_str(), sizeof(s_nickBuf) - 1);
+                s_nickBufInit = true;
+            }
+            smallLabel("Nick");
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::InputText("##nickinput", s_nickBuf, sizeof(s_nickBuf))) c.nick = s_nickBuf;
+            smallLabel("Reopen a page to see the change.");
+        });
     }
 }
 
@@ -847,6 +862,17 @@ void panelVisuals(int idx) {
             toggle("Rainbow", &c.orbRainbow, "Cycles orb colors.");
         });
         toggle("Player Aura", &c.playerAura, "Soft glow around the player.");
+        toggle("Cosmic Trail", &c.cosmicTrail, "Glowing gradient trail with sparkles behind the player.", "##ctrail");
+        options("##ctrail", [&] {
+            sliderF("Width", &c.trailWidth, 0.3f, 3.f, "%.2fx");
+            sliderF("Length", &c.trailLength, 0.2f, 4.f, "%.2fx");
+            colorRow("Head Color", c.trailColorA);
+            colorRow("Middle Color", c.trailColorB);
+            colorRow("Tail Color", c.trailColorC);
+            toggle("Sparkles", &c.trailSparkles, "Little stars drifting off the trail.");
+            toggle("Light Pulse", &c.trailAnimate, "A soft pulse of light travels down the trail.");
+            if (button("Hide Default Trail")) c.noTrail = true;
+        });
 
         if (matches("Skybox")) ImGui::Dummy({0.f, 2.f * S()});
         static char const* skies[] = {"Off", "Starry Night", "Evening Sunset", "Deep Nebula", "Blood Moon"};
@@ -858,26 +884,195 @@ void panelVisuals(int idx) {
     }
 }
 
+// per-label settings (used by the Labels panel and by the label editor)
+void labelOptionsBody(int i) {
+    auto& L = cfg().lbl[i];
+    static char const* aligns[] = {"Left", "Center", "Right"};
+    combo("Alignment", &L.align, aligns, 3);
+
+    static std::vector<char const*> fontItems = [] {
+        std::vector<char const*> v{"Use global font"};
+        for (int f = 0; f < labels::fontCount(); f++) v.push_back(labels::fontNames()[f]);
+        return v;
+    }();
+    int sel = L.font + 1;
+    if (combo("Font", &sel, fontItems.data(), static_cast<int>(fontItems.size()))) L.font = sel - 1;
+    sliderF("Size", &L.scale, 0.3f, 3.f, "%.2fx");
+    if (button("Reset Position")) {
+        Config def;
+        L.x = def.lbl[i].x;
+        L.y = def.lbl[i].y;
+        L.align = def.lbl[i].align;
+    }
+}
+
 void panelLabels(int idx) {
     auto& c = cfg();
+    static char const* popupIds[kLabelCount] = {"##lbl0", "##lbl1", "##lbl2", "##lbl3", "##lbl4",
+                                                "##lbl5", "##lbl6", "##lbl7", "##lbl8"};
+    static char const* tips[kLabelCount] = {
+        "Red dot = cheats used this attempt, green = clean.", nullptr, "Clicks per second.", nullptr, nullptr, nullptr, nullptr,
+        "Time spent in the level this session.", nullptr};
+
     if (Panel p{"labels", "Labels", idx}) {
         toggle("Show Labels", &c.labels, "Master switch for all labels.", "##labels");
         options("##labels", [&] {
-            static char const* corners[] = {"Top Left", "Top Right", "Bottom Left", "Bottom Right"};
-            combo("Position", &c.labelCorner, corners, 4);
-            sliderF("Scale", &c.labelScale, 0.2f, 1.f, "%.2f");
+            sliderF("Scale", &c.labelScale, 0.3f, 3.f, "%.2fx");
             sliderF("Opacity", &c.labelOpacity, 0.1f, 1.f, "%.2f");
         });
-        toggle("Cheat Indicator", &c.lblCheat, "Red dot = cheats used, green = clean.");
-        toggle("FPS", &c.lblFps);
-        toggle("CPS", &c.lblCps, "Clicks per second.");
-        toggle("Noclip Accuracy", &c.lblNoclipAcc);
-        toggle("Noclip Deaths", &c.lblNoclipDeaths);
-        toggle("Attempt", &c.lblAttempt);
-        toggle("Percentage", &c.lblPercent);
-        toggle("Session Time", &c.lblTime, "Time spent in the level this session.");
-        toggle("Clock", &c.lblClock);
+        combo("Font", &c.labelFont, labels::fontNames(), labels::fontCount());
+
+        for (int i = 0; i < kLabelCount; i++) {
+            toggle(labels::labelName(i), &c.lbl[i].enabled, tips[i], popupIds[i]);
+            options(popupIds[i], [&] { labelOptionsBody(i); });
+        }
+
+        if (button("Edit Positions")) s_editLabels = true;
+        if (button("Reset Positions")) c.resetLabelLayout();
     }
+}
+
+void panelKeybinds(int idx) {
+    auto& c = cfg();
+    if (Panel p{"keybinds", "Keybinds", idx}) {
+        keybind("Menu Key", &c.menuKey);
+        keybind("Noclip Key", &c.noclipKey);
+        keybind("Jump Key 1", &c.jumpKeys[0]);
+        keybind("Jump Key 2", &c.jumpKeys[1]);
+        keybind("Jump Key 3", &c.jumpKeys[2]);
+        keybind("P2 Jump Key", &c.p2JumpKey);
+        keybind("Platformer Left", &c.leftKey);
+        keybind("Platformer Right", &c.rightKey);
+    }
+}
+
+// Full-screen overlay: drag labels to move them, right-click for options.
+void drawLabelEditor(float g) {
+    auto& io = ImGui::GetIO();
+    auto& c = cfg();
+    float s = S();
+    float t = static_cast<float>(ImGui::GetTime());
+    auto win = CCDirector::get()->getWinSize();
+    ImVec2 ds = io.DisplaySize;
+
+    ImGui::SetNextWindowPos({0.f, 0.f});
+    ImGui::SetNextWindowSize(ds);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+    ImGui::Begin(
+        "##starlight-label-editor", nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollWithMouse
+    );
+    ImGui::PopStyleVar();
+    auto* dl = ImGui::GetWindowDrawList();
+
+    // center guides
+    ImVec2 center = ImGuiCocos::cocosToFrame(ccp(win.width * 0.5f, win.height * 0.5f));
+    dl->AddLine({center.x, 0.f}, {center.x, ds.y}, u32(accent(0.18f * g)));
+    dl->AddLine({0.f, center.y}, {ds.x, center.y}, u32(accent(0.18f * g)));
+
+    auto node = LabelsNode::current();
+    static ImVec2 dragStart;
+
+    for (int i = 0; i < kLabelCount; i++) {
+        auto& L = c.lbl[i];
+        if (!L.enabled) continue;
+        ImGui::PushID(i);
+
+        ImVec2 anchor = ImGuiCocos::cocosToFrame(ccp(L.x * win.width, L.y * win.height));
+        ImVec2 a, b;
+        CCRect r;
+        if (node && node->getWorldBox(i, r)) {
+            a = ImGuiCocos::cocosToFrame(ccp(r.getMinX(), r.getMaxY()));
+            b = ImGuiCocos::cocosToFrame(ccp(r.getMaxX(), r.getMinY()));
+        } else {
+            // no level open: draw a preview of the label
+            char const* sample = labels::sampleText(i);
+            float fs = 18.f * s * c.labelScale * L.scale;
+            ImVec2 ts = textSize(boldFont(), fs, sample);
+            float ax = L.align == 0 ? 0.f : L.align == 1 ? 0.5f : 1.f;
+            a = {anchor.x - ts.x * ax, anchor.y - ts.y * 0.5f};
+            b = a + ts;
+            dl->AddText(boldFont(), fs, a, u32(withA(mix(kText, accent(), 0.3f), g)), sample);
+        }
+        a -= ImVec2(5.f * s, 3.f * s);
+        b += ImVec2(5.f * s, 3.f * s);
+        if (b.x - a.x < 18.f * s) {
+            float cx = (a.x + b.x) * 0.5f;
+            a.x = cx - 9.f * s;
+            b.x = cx + 9.f * s;
+        }
+        if (b.y - a.y < 14.f * s) {
+            float cy = (a.y + b.y) * 0.5f;
+            a.y = cy - 7.f * s;
+            b.y = cy + 7.f * s;
+        }
+
+        ImGui::SetCursorScreenPos(a);
+        ImGui::InvisibleButton("##box", b - a, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+        bool hov = ImGui::IsItemHovered(), act = ImGui::IsItemActive();
+        if (ImGui::IsItemActivated()) dragStart = anchor;
+        if (act && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 1.f)) {
+            ImVec2 raw = dragStart + ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.f);
+            CCPoint cp = ImGuiCocos::frameToCocos(raw);
+            // snap to edges and center
+            auto snap = [](float v, float size) {
+                float pts = v * size;
+                for (float target : {size * 0.012f, size * 0.5f, size * 0.988f}) {
+                    if (std::abs(pts - target) < 5.f) return target / size;
+                }
+                return v;
+            };
+            L.x = std::clamp(snap(cp.x / win.width, win.width), 0.f, 1.f);
+            L.y = std::clamp(snap(cp.y / win.height, win.height), 0.f, 1.f);
+        }
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("##lblopts");
+        if (hov && !act) tooltip("Drag to move - right-click for options");
+
+        float pulse = 0.5f + 0.5f * std::sin(t * 3.f + i);
+        bool hot = hov || act;
+        dl->AddRectFilled(a, b, u32(accent((hot ? 0.22f : 0.10f) * g)), 4.f * s);
+        dl->AddRect(a, b, u32(accent((hot ? 1.f : 0.45f + 0.25f * pulse) * g)), 4.f * s, 0, 1.5f * s);
+
+        char const* name = labels::labelName(i);
+        float ns = 12.f * s;
+        ImVec2 nts = textSize(regularFont(), ns, name);
+        ImVec2 tag{a.x, a.y - nts.y - 4.f * s};
+        if (tag.y < 0.f) tag.y = b.y + 4.f * s;
+        dl->AddRectFilled(tag - ImVec2(4.f * s, 1.f * s), tag + nts + ImVec2(4.f * s, 1.f * s), u32(withA(kPanel, 0.9f * g)), 3.f * s);
+        dl->AddText(regularFont(), ns, tag, u32(withA(kText, g)), name);
+
+        options("##lblopts", [&] { labelOptionsBody(i); });
+        ImGui::PopID();
+    }
+
+    // banner with instructions
+    float bw = 430.f * s, bh = node ? 74.f * s : 92.f * s;
+    ImVec2 bp{(ds.x - bw) * 0.5f, 14.f * s};
+    dl->AddRectFilled(bp, bp + ImVec2(bw, bh), u32(withA(kPanel, 0.95f * g)), 9.f * s);
+    dl->AddRect(bp, bp + ImVec2(bw, bh), u32(accent(0.6f * g)), 9.f * s, 0, 1.2f * s);
+    ImFont* bold = boldFont();
+    float fs = ImGui::GetFontSize();
+    char const* title = "Label Editor";
+    ImVec2 tsz = textSize(bold, fs, title);
+    dl->AddText(bold, fs, {bp.x + (bw - tsz.x) * 0.5f, bp.y + 8.f * s}, u32(withA(kWhite, g)), title);
+    sparkle(dl, {bp.x + (bw - tsz.x) * 0.5f - 12.f * s, bp.y + 8.f * s + tsz.y * 0.5f}, 5.f * s, u32(accent(g)));
+    char const* help = "Drag labels to move them. Right-click a label for its options.";
+    ImVec2 hsz = ImGui::CalcTextSize(help);
+    dl->AddText({bp.x + (bw - hsz.x) * 0.5f, bp.y + 30.f * s}, u32(withA(kTextDim, g)), help);
+    if (!node) {
+        char const* hint = "Open a level to see and move the real labels.";
+        ImVec2 isz = ImGui::CalcTextSize(hint);
+        dl->AddText({bp.x + (bw - isz.x) * 0.5f, bp.y + 48.f * s}, u32(withA(accent2(), g)), hint);
+    }
+
+    float btnW = 120.f * s;
+    ImGui::SetCursorScreenPos({bp.x + bw * 0.5f - btnW - 5.f * s, bp.y + bh + 8.f * s});
+    if (button("Done", btnW)) s_editLabels = false;
+    ImGui::SetCursorScreenPos({bp.x + bw * 0.5f + 5.f * s, bp.y + bh + 8.f * s});
+    if (button("Reset All", btnW)) c.resetLabelLayout();
+
+    ImGui::End();
 }
 
 void panelInterface(int idx) {
@@ -893,8 +1088,6 @@ void panelInterface(int idx) {
         toggle("Animations", &c.animations, "Animated opening and closing.");
         toggle("Starfield Backdrop", &c.starfield, "Stars and nebula behind the menu.");
         sliderF("Background Dim", &c.bgDim, 0.f, 0.9f, "%.2f");
-        keybind("Menu Key", &c.menuKey);
-        keybind("Noclip Key", &c.noclipKey);
         if (button("Reset Layout")) computeLayout(true);
         if (button("Save Settings")) saveAll();
     }
@@ -961,6 +1154,14 @@ void draw() {
     }
 
     float g = easeOutCubic(s_progress);
+
+    if (s_editLabels) {
+        // light dim only, so the level stays visible while placing labels
+        ImGui::GetBackgroundDrawList()->AddRectFilled({0.f, 0.f}, ImGui::GetIO().DisplaySize, u32({0.015f, 0.008f, 0.04f, 0.18f * g}));
+        drawLabelEditor(g);
+        return;
+    }
+
     drawBackdrop(g);
     drawLogo(g);
 
@@ -971,6 +1172,7 @@ void draw() {
     panelBypass(i++);
     panelVisuals(i++);
     panelLabels(i++);
+    panelKeybinds(i++);
     panelInterface(i++);
     panelShortcuts(i++);
 }
@@ -982,11 +1184,14 @@ void toggle() {
         PlatformToolbox::showCursor();
     } else {
         s_capturing = nullptr;
+        s_editLabels = false;
         saveAll();
     }
 }
 
 bool isOpen() { return s_open; }
+
+bool isEditingLabels() { return s_open && s_editLabels; }
 
 bool captureKey(int key) {
     if (!s_capturing) return false;

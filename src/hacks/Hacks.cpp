@@ -2,8 +2,10 @@
 
 #include "Config.hpp"
 #include "State.hpp"
+#include "visuals/Labels.hpp"
 
 #include <Geode/Geode.hpp>
+#include <Geode/modify/CCLabelBMFont.hpp>
 #include <Geode/modify/CCParticleSystemQuad.hpp>
 #include <Geode/modify/CCScheduler.hpp>
 #include <Geode/modify/CCTextInputNode.hpp>
@@ -65,6 +67,9 @@ class $modify(StarlightScheduler, CCScheduler) {
         auto& c = cfg();
         float mult = c.speedhack ? std::clamp(c.speed, 0.01f, 100.f) : 1.f;
         CCScheduler::update(dt * mult);
+
+        // labels refresh even while the level is paused (label editor)
+        labels::tick(dt);
     }
 };
 
@@ -142,6 +147,30 @@ class $modify(StarlightPlayerObject, PlayerObject) {
     void playDeathEffect() {
         if (cfg().noDeathEffect) return;
         PlayerObject::playDeathEffect();
+    }
+};
+
+// ---------------------------------------------------------------- nick changer
+// Purely visual: any label showing your own username shows the custom nick instead.
+// Nothing is sent to the servers.
+
+static bool isOwnName(char const* str) {
+    if (!str || !*str) return false;
+    if (auto am = GJAccountManager::sharedState(); am && am->m_accountID > 0) {
+        if (std::string(am->m_username) == str) return true;
+    }
+    std::string playerName = GameManager::get()->m_playerName;
+    return !playerName.empty() && playerName != "Player" && playerName == str;
+}
+
+class $modify(StarlightNickLabel, CCLabelBMFont) {
+    void setString(char const* str, bool needUpdateLabel) {
+        auto& c = cfg();
+        if (c.nickChanger && !c.nick.empty() && isOwnName(str)) {
+            CCLabelBMFont::setString(c.nick.c_str(), needUpdateLabel);
+            return;
+        }
+        CCLabelBMFont::setString(str, needUpdateLabel);
     }
 };
 

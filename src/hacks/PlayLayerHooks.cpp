@@ -1,18 +1,16 @@
 // Everything that runs inside a level: noclip, safe mode, respawn delay,
-// player tweaks, hitboxes, skybox, orbs and labels.
+// player tweaks, hitboxes, skybox and orbs. Labels live in visuals/Labels.cpp.
 
 #include "Config.hpp"
 #include "State.hpp"
+#include "visuals/CosmicTrail.hpp"
+#include "visuals/Labels.hpp"
 #include "visuals/OrbTrail.hpp"
 #include "visuals/Skybox.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 
-#include <ctime>
-#include <string>
-#include <string_view>
-#include <vector>
 
 using namespace geode::prelude;
 using namespace starlight;
@@ -45,21 +43,15 @@ struct VisOverride {
     }
 };
 
-constexpr ccColor3B kWhite{255, 255, 255};
-constexpr ccColor3B kRed{255, 70, 100};
-constexpr ccColor3B kGreen{90, 255, 150};
-
 } // namespace
 
 class $modify(StarlightPlayLayer, PlayLayer) {
     struct Fields {
         SkyboxNode* sky = nullptr;
         OrbTrailNode* orbs = nullptr;
-        CCNode* labels = nullptr;
-        std::vector<CCLabelBMFont*> labelPool;
+        CosmicTrailNode* cosmic = nullptr;
         CCLayerColor* flash = nullptr;
         float flashA = 0.f;
-        bool cheated = false;
         bool hitboxesWereOn = false;
         VisOverride background;
         VisOverride ground[2];
@@ -70,7 +62,7 @@ class $modify(StarlightPlayLayer, PlayLayer) {
 
     bool sl_shouldBlockProgress() {
         auto& c = cfg();
-        return c.safeMode || (c.autoSafeMode && (m_fields->cheated || cheatsActive()));
+        return c.safeMode || (c.autoSafeMode && (state().cheatedAttempt || cheatsActive()));
     }
 
     // ------------------------------------------------------------ lifecycle
@@ -80,23 +72,22 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         state().sessionTime = 0.0;
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
 
-        m_fields->cheated = cheatsActive();
+        state().cheatedAttempt = cheatsActive();
 
         auto flash = CCLayerColor::create({255, 0, 0, 0});
         this->addChild(flash, 9998);
         m_fields->flash = flash;
 
-        auto labels = CCNode::create();
-        this->addChild(labels, 9999);
-        m_fields->labels = labels;
+        this->addChild(LabelsNode::create(), 9999);
         return true;
     }
 
     void resetLevel() {
         PlayLayer::resetLevel();
         state().resetAttempt();
-        m_fields->cheated = cheatsActive();
+        state().cheatedAttempt = cheatsActive();
         if (m_fields->orbs) m_fields->orbs->snap();
+        if (m_fields->cosmic) m_fields->cosmic->clearTrail();
     }
 
     // ------------------------------------------------------------ noclip / safe mode / respawn
@@ -105,7 +96,7 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         auto& c = cfg();
         if (c.noclip && object != m_anticheatSpike) {
             state().noclipHitThisFrame = true;
-            m_fields->cheated = true;
+            state().cheatedAttempt = true;
             return;
         }
 
@@ -142,7 +133,7 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         PlayLayer::postUpdate(dt);
 
         auto& st = state();
-        if (cheatsActive()) m_fields->cheated = true;
+        if (cheatsActive()) state().cheatedAttempt = true;
 
         st.noclipFrames++;
         if (st.noclipHitThisFrame) {
@@ -158,7 +149,6 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         this->sl_updatePlayerTweaks();
         this->sl_updateHitboxes();
         this->sl_updateVisuals(dt);
-        this->sl_updateLabels();
     }
 
     void sl_updateFlash(float dt) {
@@ -249,69 +239,22 @@ class $modify(StarlightPlayLayer, PlayLayer) {
             m_fields->orbs->removeFromParent();
             m_fields->orbs = nullptr;
         }
-    }
 
-    void sl_updateLabels() {
-        auto node = m_fields->labels;
-        if (!node) return;
-        auto& c = cfg();
-        auto& st = state();
-
-        std::vector<std::pair<std::string, ccColor3B>> lines;
-        if (c.labels) {
-            if (c.lblCheat) lines.emplace_back(".", (m_fields->cheated || cheatsActive()) ? kRed : kGreen);
-            if (c.lblFps) lines.emplace_back(fmt::format("{:.0f} FPS", st.fps), kWhite);
-            if (c.lblCps) {
-                double now = nowSeconds();
-                auto& clicks = st.clicks;
-                while (!clicks.empty() && now - clicks.front() > 1.0) clicks.pop_front();
-                lines.emplace_back(fmt::format("{} CPS", clicks.size()), kWhite);
+        // ---- cosmic gradient trail
+        if (c.cosmicTrail && m_player1 && m_objectLayer && m_player1->getParent()) {
+            if (!m_fields->cosmic) {
+                auto trail = CosmicTrailNode::create();
+                int z = m_player1->getParent() == m_objectLayer ? m_player1->getZOrder() - 2 : 999;
+                m_objectLayer->addChild(trail, z);
+                m_fields->cosmic = trail;
             }
-            if (c.lblNoclipAcc) lines.emplace_back(fmt::format("{:.2f}%", st.noclipAccuracy()), st.noclipWasHit ? kRed : kWhite);
-            if (c.lblNoclipDeaths) lines.emplace_back(fmt::format("{} Deaths", st.noclipDeaths), kWhite);
-            if (c.lblAttempt) lines.emplace_back(fmt::format("Attempt {}", m_attempts), kWhite);
-            if (c.lblPercent) lines.emplace_back(fmt::format("{:.2f}%", this->getCurrentPercent()), kWhite);
-            if (c.lblTime) {
-                int s = static_cast<int>(st.sessionTime);
-                lines.emplace_back(fmt::format("{}:{:02}", s / 60, s % 60), kWhite);
-            }
-            if (c.lblClock) {
-                std::time_t t = std::time(nullptr);
-                std::tm tm{};
-                localtime_s(&tm, &t);
-                lines.emplace_back(fmt::format("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec), kWhite);
-            }
-        }
-
-        auto& pool = m_fields->labelPool;
-        while (pool.size() < lines.size()) {
-            auto label = CCLabelBMFont::create("", "bigFont.fnt");
-            node->addChild(label);
-            pool.push_back(label);
-        }
-
-        auto win = CCDirector::get()->getWinSize();
-        bool right = c.labelCorner == 1 || c.labelCorner == 3;
-        bool bottom = c.labelCorner >= 2;
-        float x = right ? win.width - 5.f : 5.f;
-        float y = bottom ? 3.f : win.height - 3.f;
-
-        for (size_t i = 0; i < pool.size(); i++) {
-            auto label = pool[i];
-            if (i >= lines.size()) {
-                label->setVisible(false);
-                continue;
-            }
-            auto const& [text, color] = lines[i];
-            label->setVisible(true);
-            if (std::string_view(label->getString()) != text) label->setString(text.c_str());
-            label->setScale(c.labelScale * (text == "." ? 1.6f : 1.f));
-            label->setColor(color);
-            label->setOpacity(static_cast<GLubyte>(std::clamp(c.labelOpacity, 0.f, 1.f) * 255.f));
-            label->setAnchorPoint({right ? 1.f : 0.f, bottom ? 0.f : 1.f});
-            label->setPosition({x, y});
-            float h = label->getContentSize().height * label->getScale() * 0.8f;
-            y += bottom ? h : -h;
+            CCPoint world = m_player1->getParent()->convertToWorldSpace(m_player1->getPosition());
+            CCPoint local = m_objectLayer->convertToNodeSpace(world);
+            m_fields->cosmic->step(dt, local, true);
+        } else if (m_fields->cosmic) {
+            m_fields->cosmic->removeFromParent();
+            m_fields->cosmic = nullptr;
         }
     }
+
 };
