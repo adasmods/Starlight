@@ -54,6 +54,19 @@ static bool handleGameBind(int key, KeyboardInputData::Action action) {
     return true;
 }
 
+// Click teleport: moves player 1 to the mouse cursor (cheat).
+static bool teleportToMouse() {
+    auto pl = PlayLayer::get();
+    if (!pl || !pl->m_player1 || !pl->m_player1->getParent()) return false;
+    auto player = pl->m_player1;
+    CCPoint local = player->getParent()->convertToNodeSpace(geode::cocos::getMousePos());
+    player->m_position = local;
+    player->setPosition(local);
+    player->m_yVelocity = 0.0;
+    state().cheatedAttempt = true;
+    return true;
+}
+
 // Keyboard: menu toggle, keybind capture, noclip key, custom jump keys.
 // Priority -10 so we see keys before imgui-cocos swallows them.
 $execute {
@@ -71,9 +84,20 @@ $execute {
                 }
 
                 if (handleGameBind(key, evt.action)) return ListenerResult::Stop;
-                if (!press) return ListenerResult::Propagate;
 
                 auto& c = cfg();
+
+                // frame stepper: each press (or key repeat while held) advances one tick
+                if (c.frameStepper && c.stepKey != 0 && key == c.stepKey && PlayLayer::get()) {
+                    if (evt.action != KeyboardInputData::Action::Release) state().stepRequests++;
+                    return ListenerResult::Stop;
+                }
+
+                if (!press) return ListenerResult::Propagate;
+
+                if (c.teleportKey != 0 && key == c.teleportKey) {
+                    if (teleportToMouse()) return ListenerResult::Stop;
+                }
                 if (c.menuKey != 0 && key == c.menuKey) {
                     menu::toggle();
                     return ListenerResult::Stop;

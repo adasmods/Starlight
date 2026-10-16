@@ -1,5 +1,7 @@
 #include "Config.hpp"
 
+#include "bot/Bot.hpp"
+
 #include <Geode/Geode.hpp>
 #include <mutex>
 #include <string>
@@ -29,6 +31,15 @@ static void visit(Config& c, F&& f) {
     f("pitch-shift", c.pitchShift);
     f("pitch", c.pitch);
     f("lock-cursor", c.lockCursor);
+    f("tps-bypass", c.tpsBypass);
+    f("tps", c.tps);
+    f("frame-stepper", c.frameStepper);
+    f("pause-countdown", c.pauseCountdown);
+    f("show-taps", c.showTaps);
+    f("no-shaders", c.noShaders);
+    f("no-object-glow", c.noObjectGlow);
+    f("unlock-shop", c.unlockShop);
+    f("bot-ignore-inputs", c.botIgnoreInputs);
 
     f("noclip", c.noclip);
     f("noclip-flash", c.noclipFlash);
@@ -125,6 +136,8 @@ static void visit(Config& c, F&& f) {
 
     f("menu-key", c.menuKey);
     f("noclip-key", c.noclipKey);
+    f("step-key", c.stepKey);
+    f("teleport-key", c.teleportKey);
     f("jump-keys", c.jumpKeys);
     f("p2-jump-key", c.p2JumpKey);
     f("left-key", c.leftKey);
@@ -175,7 +188,7 @@ void saveConfig() {
 bool cheatsActive() {
     auto& c = cfg();
     return c.noclip || (c.speedhack && c.speed != 1.f) || c.showHitboxes || c.jumpHack || c.autoClicker || c.instantComplete ||
-           c.forcePlatformer;
+           c.forcePlatformer || (c.tpsBypass && c.tps != 240.f) || c.frameStepper || bot::mode() == bot::Mode::Playback;
 }
 
 static std::mutex s_deferMutex;

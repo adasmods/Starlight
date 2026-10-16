@@ -18,6 +18,11 @@ struct State {
     float bestStart = 0.f;
     float bestEnd = 0.f;
 
+    // frame stepper: ticks waiting to be stepped
+    int stepRequests = 0;
+    // true while the TPS bypass runs extra physics steps (skip visuals)
+    bool tpsSubstep = false;
+
     // a cheat was used during the current attempt
     bool cheatedAttempt = false;
 

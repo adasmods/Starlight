@@ -38,6 +38,22 @@ CCTexture2D* glow(int size) {
     return make(px, size, size);
 }
 
+CCTexture2D* ring(int size) {
+    std::vector<uint8_t> px(size * size * 4);
+    float half = size * 0.5f;
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            float dx = (x + 0.5f - half) / half, dy = (y + 0.5f - half) / half;
+            float d = std::sqrt(dx * dx + dy * dy);
+            float a = std::exp(-std::pow((d - 0.82f) / 0.09f, 2.f));
+            uint8_t* p = &px[(y * size + x) * 4];
+            p[0] = p[1] = p[2] = 255;
+            p[3] = static_cast<uint8_t>(std::clamp(a, 0.f, 1.f) * 255.f);
+        }
+    }
+    return make(px, size, size);
+}
+
 CCTexture2D* disc(int size, bool moon) {
     struct Crater {
         float x, y, r;

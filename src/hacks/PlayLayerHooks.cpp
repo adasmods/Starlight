@@ -3,6 +3,7 @@
 
 #include "Config.hpp"
 #include "State.hpp"
+#include "bot/Bot.hpp"
 #include "visuals/CosmicTrail.hpp"
 #include "visuals/Labels.hpp"
 #include "visuals/OrbTrail.hpp"
@@ -114,6 +115,7 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         state().cheatedAttempt = cheatsActive();
         state().runStart = this->getCurrentPercent();
         m_fields->autoKilled = false;
+        bot::onReset(this);
         if (m_fields->musicMuted) {
             FMODAudioEngine::sharedEngine()->resumeAllMusic();
             m_fields->musicMuted = false;
@@ -167,6 +169,8 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         PlayLayer::levelComplete();
         m_isTestMode = prevTest;
         this->sl_recordRun(100.f);
+        // keep the finished recording safe from the next restart
+        if (bot::mode() == bot::Mode::Record) bot::setMode(bot::Mode::Disabled);
     }
 
     void sl_recordRun(float end) {
@@ -199,6 +203,8 @@ class $modify(StarlightPlayLayer, PlayLayer) {
     // ------------------------------------------------------------ per frame
 
     void postUpdate(float dt) {
+        // TPS bypass extra steps: skip visuals/labels work for speed
+        if (state().tpsSubstep) return;
         PlayLayer::postUpdate(dt);
 
         auto& st = state();

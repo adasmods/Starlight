@@ -1,6 +1,7 @@
 // Hooks that don't belong to PlayLayer: speedhack, fps, audio, bypasses, misc.
 
 #include "Config.hpp"
+#include "bot/Bot.hpp"
 #include "State.hpp"
 #include "ui/Menu.hpp"
 #include "visuals/Labels.hpp"
@@ -172,6 +173,13 @@ class $modify(StarlightBaseLayer, GJBaseGameLayer) {
     }
 
     void handleButton(bool down, int button, bool isPlayer1) {
+        bool inLevel = PlayLayer::get() && static_cast<GJBaseGameLayer*>(PlayLayer::get()) == this;
+        if (inLevel && !bot::injecting()) {
+            // during playback the replay owns the controls
+            if (bot::mode() == bot::Mode::Playback && cfg().botIgnoreInputs) return;
+            bot::recordInput(this, button, down, isPlayer1);
+        }
+
         if (down) {
             auto& clicks = state().clicks;
             clicks.push_back(nowSeconds());

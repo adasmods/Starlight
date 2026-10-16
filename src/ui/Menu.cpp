@@ -2,6 +2,7 @@
 
 #include "Config.hpp"
 #include "State.hpp"
+#include "bot/Bot.hpp"
 #include "visuals/Labels.hpp"
 
 #include <Geode/Geode.hpp>
@@ -38,6 +39,11 @@ char s_nickBuf[64] = "";
 bool s_nickBufInit = false;
 char s_uidBuf[32] = "";
 bool s_uidBufInit = false;
+char s_replayName[64] = "my replay";
+std::string s_botMessage;
+std::vector<std::string> s_replayList;
+bool s_replayListLoaded = false;
+int s_replaySel = 0;
 
 ImFont* s_fontRegular = nullptr;
 ImFont* s_fontBold = nullptr;
@@ -241,9 +247,10 @@ struct PanelDef {
 };
 
 constexpr PanelDef kPanels[] = {
-    {"global", "Global", 7},   {"level", "Level", 19},        {"player", "Player", 17},
-    {"bypass", "Bypass", 5},   {"visuals", "Visuals", 14},    {"labels", "Labels", 16},
-    {"keybinds", "Keybinds", 8}, {"interface", "Interface", 9}, {"shortcuts", "Shortcuts", 8},
+    {"global", "Global", 9},   {"level", "Level", 23},        {"player", "Player", 17},
+    {"bypass", "Bypass", 6},   {"bot", "Bot", 10},            {"visuals", "Visuals", 14},
+    {"labels", "Labels", 16},  {"keybinds", "Keybinds", 10},  {"interface", "Interface", 9},
+    {"shortcuts", "Shortcuts", 8},
 };
 constexpr int kPanelCount = sizeof(kPanels) / sizeof(kPanels[0]);
 
@@ -831,6 +838,12 @@ void panelGlobal(int idx) {
         toggle("Pitch Shift", &c.pitchShift, "Changes the pitch of the music.", "##pitch");
         options("##pitch", [&] { sliderF("Pitch", &c.pitch, 0.5f, 2.f, "%.2fx"); });
         toggle("Lock Cursor", &c.lockCursor, "Keeps the cursor inside the game window while playing.");
+        toggle("Physics Bypass", &c.tpsBypass, "Changes the physics tick rate (TPS). Anything but 240 is a cheat.", "##tps");
+        options("##tps", [&] {
+            sliderF("Ticks per second", &c.tps, 30.f, 2000.f, "%.0f TPS", ImGuiSliderFlags_Logarithmic);
+            if (button("Reset to 240")) c.tps = 240.f;
+        });
+        toggle("Show Taps", &c.showTaps, "Shows a ripple where you click in a level.");
     }
 }
 
@@ -859,6 +872,10 @@ void panelLevel(int idx) {
         toggle("Confirm Practice Mode", &c.confirmPractice, "Asks before entering/leaving practice mode.");
         toggle("Force Platformer", &c.forcePlatformer, "Plays every level in platformer mode (cheat).");
         toggle("Instant Complete", &c.instantComplete, "Completes the level right away (cheat, never saves).");
+        toggle("Frame Stepper", &c.frameStepper, "Freezes the level; press the Step key (Keybinds) to advance one tick, hold to go slowly.");
+        toggle("Pause Countdown", &c.pauseCountdown, "3-2-1 countdown before the game resumes.");
+        toggle("No Shaders", &c.noShaders, "Disables shader triggers (re-enter the level).");
+        toggle("No Object Glow", &c.noObjectGlow, "Removes object glow (re-enter the level).");
     }
 }
 
@@ -915,6 +932,7 @@ void panelBypass(int idx) {
         toggle("Text Length Bypass", &c.textLengthBypass, "Removes text input length limits.");
         toggle("Character Filter Bypass", &c.charFilterBypass, "Allows any character in text inputs.");
         toggle("Free Scroll", &c.freeScroll, "Scroll anywhere in the editor, no limits.");
+        toggle("Unlock Shop Items", &c.unlockShop, "Shop items count as bought (client-side only).");
     }
 }
 
@@ -1003,6 +1021,53 @@ void panelLabels(int idx) {
     }
 }
 
+void panelBot(int idx) {
+    auto& c = cfg();
+    if (Panel p{"bot", "Bot", idx}) {
+        static char const* modes[] = {"Disabled", "Record", "Playback"};
+        int mode = static_cast<int>(bot::mode());
+        if (combo("Mode", &mode, modes, 3)) bot::setMode(static_cast<bot::Mode>(mode));
+        smallLabel(fmt::format("{} inputs in memory", bot::inputs().size()).c_str());
+
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        {
+            PadScope pad(8.f, 6.f);
+            ImGui::InputTextWithHint("##replayname", "Replay name", s_replayName, sizeof(s_replayName));
+        }
+        if (button("Save Replay")) {
+            bot::save(s_replayName, s_botMessage);
+            s_replayListLoaded = false;
+        }
+
+        if (!s_replayListLoaded) {
+            s_replayList = bot::listReplays();
+            s_replayListLoaded = true;
+            s_replaySel = std::clamp(s_replaySel, 0, std::max(0, static_cast<int>(s_replayList.size()) - 1));
+        }
+        if (!s_replayList.empty()) {
+            std::vector<char const*> items;
+            for (auto const& name : s_replayList) items.push_back(name.c_str());
+            combo("Saved Replays", &s_replaySel, items.data(), static_cast<int>(items.size()));
+            if (button("Load Replay")) {
+                auto const& name = s_replayList[s_replaySel];
+                if (bot::load(name, s_botMessage)) std::strncpy(s_replayName, name.c_str(), sizeof(s_replayName) - 1);
+            }
+        }
+        if (button("Refresh List")) s_replayListLoaded = false;
+        if (button("Clear Inputs")) {
+            bot::clear();
+            s_botMessage = "Inputs cleared.";
+        }
+        toggle("Ignore My Inputs", &c.botIgnoreInputs, "During playback only the replay controls the player.");
+
+        if (!s_botMessage.empty()) {
+            ImGui::PushTextWrapPos(0.f);
+            smallLabel(s_botMessage.c_str());
+            ImGui::PopTextWrapPos();
+        }
+    }
+}
+
 void panelKeybinds(int idx) {
     auto& c = cfg();
     if (Panel p{"keybinds", "Keybinds", idx}) {
@@ -1014,6 +1079,8 @@ void panelKeybinds(int idx) {
         keybind("P2 Jump Key", &c.p2JumpKey);
         keybind("Platformer Left", &c.leftKey);
         keybind("Platformer Right", &c.rightKey);
+        keybind("Step Key", &c.stepKey);
+        keybind("Teleport Key", &c.teleportKey);
     }
 }
 
@@ -1249,6 +1316,7 @@ void draw() {
     panelLevel(i++);
     panelPlayer(i++);
     panelBypass(i++);
+    panelBot(i++);
     panelVisuals(i++);
     panelLabels(i++);
     panelKeybinds(i++);

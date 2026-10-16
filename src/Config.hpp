@@ -45,6 +45,15 @@ struct Config {
     bool pitchShift = false;
     float pitch = 1.f;
     bool lockCursor = false;
+    bool tpsBypass = false;
+    float tps = 240.f;
+    bool frameStepper = false;
+    bool pauseCountdown = false;
+    bool showTaps = false;
+    bool noShaders = false;
+    bool noObjectGlow = false;
+    bool unlockShop = false;
+    bool botIgnoreInputs = true;
 
     // ---- Level
     bool noclip = false;
@@ -140,6 +149,8 @@ struct Config {
     // ---- Keybinds (cocos2d::enumKeyCodes, 0 = none)
     int menuKey = 0x09; // KEY_Tab
     int noclipKey = 0;
+    int stepKey = 0x46;     // F: frame stepper
+    int teleportKey = 0;    // click teleport
     int jumpKeys[3] = {0, 0, 0}; // extra P1 jump keys
     int p2JumpKey = 0;
     int leftKey = 0;  // platformer
