@@ -4,6 +4,7 @@
 #include "Config.hpp"
 #include "State.hpp"
 #include "bot/Bot.hpp"
+#include "hacks/Trajectory.hpp"
 #include "visuals/CosmicTrail.hpp"
 #include "visuals/Labels.hpp"
 #include "visuals/OrbTrail.hpp"
@@ -84,6 +85,7 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         state().runStart = 0.f;
         state().bestStart = state().bestEnd = 0.f;
         if (c.autoLDM && level) level->m_lowDetailModeToggled = true;
+        trajectory::reset();
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
 
         state().cheatedAttempt = cheatsActive();
@@ -127,6 +129,11 @@ class $modify(StarlightPlayLayer, PlayLayer) {
     // ------------------------------------------------------------ noclip / safe mode / respawn
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
+        // trajectory ghosts never really die
+        if (trajectory::simulating()) {
+            trajectory::onSimulatedDeath();
+            return;
+        }
         auto& c = cfg();
         if (c.noclip && object != m_anticheatSpike && !m_fields->forceKill) {
             state().noclipHitThisFrame = true;
@@ -225,6 +232,7 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         this->sl_updatePlayerTweaks();
         this->sl_updateHitboxes();
         this->sl_updateVisuals(dt);
+        trajectory::update(this);
     }
 
     // auto practice, instant complete, auto kill, autoclicker

@@ -2,6 +2,7 @@
 
 #include "Config.hpp"
 #include "bot/Bot.hpp"
+#include "discord/DiscordRPC.hpp"
 #include "State.hpp"
 #include "ui/Menu.hpp"
 #include "visuals/Labels.hpp"
@@ -108,6 +109,7 @@ class $modify(StarlightScheduler, CCScheduler) {
 
         // labels refresh even while the level is paused (label editor)
         labels::tick(dt);
+        discord::tick(dt);
     }
 };
 

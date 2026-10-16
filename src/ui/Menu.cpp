@@ -3,6 +3,8 @@
 #include "Config.hpp"
 #include "State.hpp"
 #include "bot/Bot.hpp"
+#include "discord/DiscordRPC.hpp"
+#include "recorder/Recorder.hpp"
 #include "visuals/Labels.hpp"
 
 #include <Geode/Geode.hpp>
@@ -44,6 +46,11 @@ std::string s_botMessage;
 std::vector<std::string> s_replayList;
 bool s_replayListLoaded = false;
 int s_replaySel = 0;
+char s_ffmpegBuf[260] = "";
+bool s_ffmpegBufInit = false;
+char s_discordIdBuf[32] = "";
+bool s_discordIdBufInit = false;
+std::string s_recorderMessage;
 
 ImFont* s_fontRegular = nullptr;
 ImFont* s_fontBold = nullptr;
@@ -247,10 +254,10 @@ struct PanelDef {
 };
 
 constexpr PanelDef kPanels[] = {
-    {"global", "Global", 9},   {"level", "Level", 23},        {"player", "Player", 17},
-    {"bypass", "Bypass", 6},   {"bot", "Bot", 10},            {"visuals", "Visuals", 14},
-    {"labels", "Labels", 16},  {"keybinds", "Keybinds", 10},  {"interface", "Interface", 9},
-    {"shortcuts", "Shortcuts", 8},
+    {"global", "Global", 9},     {"level", "Level", 29},        {"player", "Player", 17},
+    {"bypass", "Bypass", 6},     {"bot", "Bot", 10},            {"recorder", "Recorder", 8},
+    {"discord", "Discord", 5},   {"visuals", "Visuals", 14},    {"labels", "Labels", 16},
+    {"keybinds", "Keybinds", 11}, {"interface", "Interface", 9}, {"shortcuts", "Shortcuts", 8},
 };
 constexpr int kPanelCount = sizeof(kPanels) / sizeof(kPanels[0]);
 
@@ -876,6 +883,19 @@ void panelLevel(int idx) {
         toggle("Pause Countdown", &c.pauseCountdown, "3-2-1 countdown before the game resumes.");
         toggle("No Shaders", &c.noShaders, "Disables shader triggers (re-enter the level).");
         toggle("No Object Glow", &c.noObjectGlow, "Removes object glow (re-enter the level).");
+        toggle("Show Trajectory", &c.showTrajectory, "Shows where you'll go if you hold (violet) or release (blue) jump. Orbs, pads and portals are not simulated.", "##traj");
+        options("##traj", [&] { sliderI("Length (ticks)", &c.trajectoryLength, 30, 960); });
+        toggle("Hitbox Multiplier", &c.hitboxMultiplier, "Scales hitboxes (cheat when not 1x).", "##hitmult");
+        options("##hitmult", [&] {
+            sliderF("Player", &c.hitboxPlayer, 0.1f, 3.f, "%.2fx");
+            sliderF("Solids", &c.hitboxSolid, 0.1f, 3.f, "%.2fx");
+            sliderF("Hazards", &c.hitboxHazard, 0.1f, 3.f, "%.2fx");
+            if (button("Reset")) c.hitboxPlayer = c.hitboxSolid = c.hitboxHazard = 1.f;
+        });
+        toggle("All Passable", &c.allPassable, "Blocks and slopes become passable (cheat, re-enter the level).");
+        toggle("Legacy Gravity Bug", &c.legacyGravityBug, "Brings back the old gravity bug behaviour.");
+        toggle("Legacy Negative Scale", &c.legacyNegativeScale, "Old handling of negatively scaled objects.");
+        toggle("Legacy Radius Collision", &c.legacyRadiusCollision, "Old circle hitbox collision.");
     }
 }
 
@@ -1068,6 +1088,65 @@ void panelBot(int idx) {
     }
 }
 
+void panelRecorder(int idx) {
+    auto& c = cfg();
+    if (Panel p{"recorder", "Recorder", idx}) {
+        bool recording = recorder::isRecording();
+        if (recorder::isFinishing()) {
+            smallLabel("Encoding...");
+        } else if (button(recording ? "Stop Recording" : "Start Recording")) {
+            if (recording) {
+                recorder::stop();
+            } else {
+                recorder::start(s_recorderMessage);
+            }
+        }
+        ImGui::PushTextWrapPos(0.f);
+        smallLabel(recorder::status().c_str());
+        if (!s_recorderMessage.empty() && !recording) smallLabel(s_recorderMessage.c_str());
+        ImGui::PopTextWrapPos();
+
+        sliderI("Video FPS", &c.recordFps, 24, 120);
+        toggle("Record Audio", &c.recordAudio, "Captures the game sound and adds it to the video.");
+
+        if (!s_ffmpegBufInit) {
+            std::strncpy(s_ffmpegBuf, c.ffmpegPath.c_str(), sizeof(s_ffmpegBuf) - 1);
+            s_ffmpegBufInit = true;
+        }
+        smallLabel(recorder::findFfmpeg().empty() ? "ffmpeg: not found" : "ffmpeg: found");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        {
+            PadScope pad(8.f, 6.f);
+            if (ImGui::InputTextWithHint("##ffmpeg", "ffmpeg.exe path (optional)", s_ffmpegBuf, sizeof(s_ffmpegBuf))) {
+                c.ffmpegPath = s_ffmpegBuf;
+            }
+        }
+        if (button("Open Videos Folder")) geode::utils::file::openFolder(recorder::videoDir());
+    }
+}
+
+void panelDiscord(int idx) {
+    auto& c = cfg();
+    if (Panel p{"discord", "Discord", idx}) {
+        toggle("Rich Presence", &c.discordRpc, "Shows what you're playing on your Discord profile.");
+        toggle("Show Level Name", &c.discordShowLevel, "Shows the level name, otherwise just 'Playing a level'.");
+        if (!s_discordIdBufInit) {
+            std::strncpy(s_discordIdBuf, c.discordClientId.c_str(), sizeof(s_discordIdBuf) - 1);
+            s_discordIdBufInit = true;
+        }
+        smallLabel("Application ID (discord.com/developers)");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        {
+            PadScope pad(8.f, 6.f);
+            if (ImGui::InputTextWithHint("##discordid", "e.g. 1234567890123456789", s_discordIdBuf, sizeof(s_discordIdBuf),
+                                         ImGuiInputTextFlags_CharsDecimal)) {
+                c.discordClientId = s_discordIdBuf;
+            }
+        }
+        smallLabel(fmt::format("Status: {}", discord::status()).c_str());
+    }
+}
+
 void panelKeybinds(int idx) {
     auto& c = cfg();
     if (Panel p{"keybinds", "Keybinds", idx}) {
@@ -1081,6 +1160,7 @@ void panelKeybinds(int idx) {
         keybind("Platformer Right", &c.rightKey);
         keybind("Step Key", &c.stepKey);
         keybind("Teleport Key", &c.teleportKey);
+        keybind("Record Key", &c.recordKey);
     }
 }
 
@@ -1317,6 +1397,8 @@ void draw() {
     panelPlayer(i++);
     panelBypass(i++);
     panelBot(i++);
+    panelRecorder(i++);
+    panelDiscord(i++);
     panelVisuals(i++);
     panelLabels(i++);
     panelKeybinds(i++);

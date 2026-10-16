@@ -1,5 +1,6 @@
 #include "Config.hpp"
 #include "State.hpp"
+#include "recorder/Recorder.hpp"
 #include "ui/Menu.hpp"
 
 #include <Geode/Geode.hpp>
@@ -95,6 +96,10 @@ $execute {
 
                 if (!press) return ListenerResult::Propagate;
 
+                if (c.recordKey != 0 && key == c.recordKey) {
+                    recorder::toggle();
+                    return ListenerResult::Stop;
+                }
                 if (c.teleportKey != 0 && key == c.teleportKey) {
                     if (teleportToMouse()) return ListenerResult::Stop;
                 }

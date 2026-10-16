@@ -54,6 +54,24 @@ struct Config {
     bool noObjectGlow = false;
     bool unlockShop = false;
     bool botIgnoreInputs = true;
+    bool showTrajectory = false;
+    int trajectoryLength = 240;
+    bool hitboxMultiplier = false;
+    float hitboxPlayer = 1.f;
+    float hitboxSolid = 1.f;
+    float hitboxHazard = 1.f;
+    bool allPassable = false;
+    bool legacyGravityBug = false;
+    bool legacyNegativeScale = false;
+    bool legacyRadiusCollision = false;
+    // recorder
+    int recordFps = 60;
+    bool recordAudio = true;
+    std::string ffmpegPath;
+    // discord
+    bool discordRpc = false;
+    std::string discordClientId;
+    bool discordShowLevel = true;
 
     // ---- Level
     bool noclip = false;
@@ -151,6 +169,7 @@ struct Config {
     int noclipKey = 0;
     int stepKey = 0x46;     // F: frame stepper
     int teleportKey = 0;    // click teleport
+    int recordKey = 0;      // start/stop recorder
     int jumpKeys[3] = {0, 0, 0}; // extra P1 jump keys
     int p2JumpKey = 0;
     int leftKey = 0;  // platformer

@@ -40,6 +40,22 @@ static void visit(Config& c, F&& f) {
     f("no-object-glow", c.noObjectGlow);
     f("unlock-shop", c.unlockShop);
     f("bot-ignore-inputs", c.botIgnoreInputs);
+    f("show-trajectory", c.showTrajectory);
+    f("trajectory-length", c.trajectoryLength);
+    f("hitbox-multiplier", c.hitboxMultiplier);
+    f("hitbox-player", c.hitboxPlayer);
+    f("hitbox-solid", c.hitboxSolid);
+    f("hitbox-hazard", c.hitboxHazard);
+    f("all-passable", c.allPassable);
+    f("legacy-gravity-bug", c.legacyGravityBug);
+    f("legacy-negative-scale", c.legacyNegativeScale);
+    f("legacy-radius-collision", c.legacyRadiusCollision);
+    f("record-fps", c.recordFps);
+    f("record-audio", c.recordAudio);
+    f("ffmpeg-path", c.ffmpegPath);
+    f("discord-rpc", c.discordRpc);
+    f("discord-client-id", c.discordClientId);
+    f("discord-show-level", c.discordShowLevel);
 
     f("noclip", c.noclip);
     f("noclip-flash", c.noclipFlash);
@@ -138,6 +154,7 @@ static void visit(Config& c, F&& f) {
     f("noclip-key", c.noclipKey);
     f("step-key", c.stepKey);
     f("teleport-key", c.teleportKey);
+    f("record-key", c.recordKey);
     f("jump-keys", c.jumpKeys);
     f("p2-jump-key", c.p2JumpKey);
     f("left-key", c.leftKey);
@@ -188,7 +205,8 @@ void saveConfig() {
 bool cheatsActive() {
     auto& c = cfg();
     return c.noclip || (c.speedhack && c.speed != 1.f) || c.showHitboxes || c.jumpHack || c.autoClicker || c.instantComplete ||
-           c.forcePlatformer || (c.tpsBypass && c.tps != 240.f) || c.frameStepper || bot::mode() == bot::Mode::Playback;
+           c.forcePlatformer || (c.tpsBypass && c.tps != 240.f) || c.frameStepper || bot::mode() == bot::Mode::Playback ||
+           (c.hitboxMultiplier && (c.hitboxPlayer != 1.f || c.hitboxSolid != 1.f || c.hitboxHazard != 1.f)) || c.allPassable;
 }
 
 static std::mutex s_deferMutex;
