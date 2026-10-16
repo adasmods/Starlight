@@ -58,6 +58,15 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         VisOverride player[2];
         VisOverride trail[2];
         VisOverride wave[2];
+        VisOverride robotFire[2];
+        bool solidWaveOn = false;
+        bool practiceApplied = false;
+        bool instantDone = false;
+        bool autoKilled = false;
+        bool forceKill = false;
+        bool musicMuted = false;
+        bool clickerDown = false;
+        float clickerTimer = 0.f;
     };
 
     bool sl_shouldBlockProgress() {
@@ -68,11 +77,28 @@ class $modify(StarlightPlayLayer, PlayLayer) {
     // ------------------------------------------------------------ lifecycle
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
+        auto& c = cfg();
         state().resetAttempt();
         state().sessionTime = 0.0;
+        state().runStart = 0.f;
+        state().bestStart = state().bestEnd = 0.f;
+        if (c.autoLDM && level) level->m_lowDetailModeToggled = true;
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
 
         state().cheatedAttempt = cheatsActive();
+
+        if (c.forcePlatformer) {
+            m_isPlatformer = true;
+            if (m_levelSettings) m_levelSettings->m_platformerMode = true;
+            for (auto p : {m_player1, m_player2}) {
+                if (p) p->togglePlatformerMode(true);
+            }
+        }
+        if (c.forceGhostTrail) {
+            for (auto p : {m_player1, m_player2}) {
+                if (p) p->toggleGhostEffect(static_cast<GhostType>(1));
+            }
+        }
 
         auto flash = CCLayerColor::create({255, 0, 0, 0});
         this->addChild(flash, 9998);
@@ -86,6 +112,12 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         PlayLayer::resetLevel();
         state().resetAttempt();
         state().cheatedAttempt = cheatsActive();
+        state().runStart = this->getCurrentPercent();
+        m_fields->autoKilled = false;
+        if (m_fields->musicMuted) {
+            FMODAudioEngine::sharedEngine()->resumeAllMusic();
+            m_fields->musicMuted = false;
+        }
         if (m_fields->orbs) m_fields->orbs->snap();
         if (m_fields->cosmic) m_fields->cosmic->clearTrail();
     }
@@ -94,7 +126,7 @@ class $modify(StarlightPlayLayer, PlayLayer) {
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         auto& c = cfg();
-        if (c.noclip && object != m_anticheatSpike) {
+        if (c.noclip && object != m_anticheatSpike && !m_fields->forceKill) {
             state().noclipHitThisFrame = true;
             state().cheatedAttempt = true;
             return;
@@ -103,8 +135,17 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         bool block = sl_shouldBlockProgress();
         bool prevTest = m_isTestMode;
         if (block) m_isTestMode = true;
+        bool wasDead = player && player->m_isDead;
         PlayLayer::destroyPlayer(player, object);
         m_isTestMode = prevTest;
+
+        if (player && player->m_isDead && !wasDead) {
+            this->sl_recordRun(this->getCurrentPercent());
+            if (c.muteOnDeath && !m_isPracticeMode) {
+                FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
+                m_fields->musicMuted = true;
+            }
+        }
 
         if (c.customRespawn) {
             if (auto action = this->getActionByTag(0x10)) {
@@ -125,6 +166,34 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         if (block) m_isTestMode = true;
         PlayLayer::levelComplete();
         m_isTestMode = prevTest;
+        this->sl_recordRun(100.f);
+    }
+
+    void sl_recordRun(float end) {
+        auto& st = state();
+        if (end - st.runStart > st.bestEnd - st.bestStart) {
+            st.bestStart = st.runStart;
+            st.bestEnd = end;
+        }
+    }
+
+    // ------------------------------------------------------------ small level tweaks
+
+    void updateProgressbar() {
+        PlayLayer::updateProgressbar();
+        if (cfg().accuratePercent && m_percentageLabel && !m_isPlatformer) {
+            m_percentageLabel->setString(fmt::format("{:.2f}%", this->getCurrentPercent()).c_str());
+        }
+    }
+
+    void updateAttempts() {
+        if (cfg().freezeAttempts) return;
+        PlayLayer::updateAttempts();
+    }
+
+    void showCompleteEffect() {
+        if (cfg().hideCompleteVfx) return;
+        PlayLayer::showCompleteEffect();
     }
 
     // ------------------------------------------------------------ per frame
@@ -145,10 +214,54 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         st.noclipHitThisFrame = false;
         st.sessionTime += dt;
 
+        this->sl_updateAutomation(dt);
         this->sl_updateFlash(dt);
         this->sl_updatePlayerTweaks();
         this->sl_updateHitboxes();
         this->sl_updateVisuals(dt);
+    }
+
+    // auto practice, instant complete, auto kill, autoclicker
+    void sl_updateAutomation(float dt) {
+        auto& c = cfg();
+
+        if (c.autoPractice && !m_fields->practiceApplied) {
+            m_fields->practiceApplied = true;
+            if (!m_isPracticeMode) {
+                Ref<PlayLayer> self = this;
+                defer([self] { self->togglePracticeMode(true); });
+            }
+        }
+
+        if (c.instantComplete && !m_fields->instantDone && !m_hasCompletedLevel && m_gameState.m_levelTime > 0.2) {
+            m_fields->instantDone = true;
+            this->levelComplete();
+            return;
+        }
+
+        if (c.autoKill && !m_fields->autoKilled && m_player1 && !m_player1->m_isDead &&
+            this->getCurrentPercent() >= c.autoKillPercent) {
+            m_fields->autoKilled = true;
+            m_fields->forceKill = true;
+            this->destroyPlayer(m_player1, nullptr);
+            m_fields->forceKill = false;
+        }
+
+        if (c.autoClicker && !m_hasCompletedLevel) {
+            float period = 1.f / std::clamp(c.autoClickerCps, 1.f, 60.f);
+            m_fields->clickerTimer += dt;
+            if (!m_fields->clickerDown && m_fields->clickerTimer >= period) {
+                this->handleButton(true, 1, true);
+                m_fields->clickerDown = true;
+                m_fields->clickerTimer = 0.f;
+            } else if (m_fields->clickerDown && m_fields->clickerTimer >= period * 0.5f) {
+                this->handleButton(false, 1, true);
+                m_fields->clickerDown = false;
+            }
+        } else if (m_fields->clickerDown) {
+            this->handleButton(false, 1, true);
+            m_fields->clickerDown = false;
+        }
     }
 
     void sl_updateFlash(float dt) {
@@ -169,7 +282,16 @@ class $modify(StarlightPlayLayer, PlayLayer) {
             m_fields->player[i].apply(p, c.hidePlayer);
             m_fields->trail[i].apply(p->m_regularTrail, c.noTrail);
             m_fields->wave[i].apply(p->m_waveTrail, c.noWaveTrail);
+            m_fields->robotFire[i].apply(p->m_robotFire, c.noRobotFire);
+
+            if (p->m_waveTrail && (c.solidWaveTrail || m_fields->solidWaveOn)) {
+                p->m_waveTrail->m_isSolid = c.solidWaveTrail;
+                p->m_waveTrail->setBlendFunc(
+                    c.solidWaveTrail ? ccBlendFunc{GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA} : ccBlendFunc{GL_SRC_ALPHA, GL_ONE}
+                );
+            }
         }
+        m_fields->solidWaveOn = c.solidWaveTrail;
     }
 
     void sl_updateHitboxes() {

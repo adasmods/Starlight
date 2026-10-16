@@ -13,6 +13,11 @@ struct State {
     int noclipDeadFrames = 0;
     int noclipDeaths = 0;
 
+    // run tracking (percent)
+    float runStart = 0.f;
+    float bestStart = 0.f;
+    float bestEnd = 0.f;
+
     // a cheat was used during the current attempt
     bool cheatedAttempt = false;
 

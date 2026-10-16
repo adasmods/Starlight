@@ -241,9 +241,9 @@ struct PanelDef {
 };
 
 constexpr PanelDef kPanels[] = {
-    {"global", "Global", 5},   {"level", "Level", 6},         {"player", "Player", 7},
-    {"bypass", "Bypass", 4},   {"visuals", "Visuals", 14},    {"labels", "Labels", 14},
-    {"keybinds", "Keybinds", 8}, {"interface", "Interface", 9}, {"shortcuts", "Shortcuts", 5},
+    {"global", "Global", 7},   {"level", "Level", 19},        {"player", "Player", 17},
+    {"bypass", "Bypass", 5},   {"visuals", "Visuals", 14},    {"labels", "Labels", 16},
+    {"keybinds", "Keybinds", 8}, {"interface", "Interface", 9}, {"shortcuts", "Shortcuts", 8},
 };
 constexpr int kPanelCount = sizeof(kPanels) / sizeof(kPanels[0]);
 
@@ -828,6 +828,9 @@ void panelGlobal(int idx) {
         toggle("Auto Safe Mode", &c.autoSafeMode, "Blocks progress automatically when a cheat was used this attempt.");
         toggle("Transition Time", &c.customTransition, "Changes the scene fade duration.", "##trans");
         options("##trans", [&] { sliderF("Duration multiplier", &c.transitionTime, 0.f, 1.f, "%.2fx"); });
+        toggle("Pitch Shift", &c.pitchShift, "Changes the pitch of the music.", "##pitch");
+        options("##pitch", [&] { sliderF("Pitch", &c.pitch, 0.5f, 2.f, "%.2fx"); });
+        toggle("Lock Cursor", &c.lockCursor, "Keeps the cursor inside the game window while playing.");
     }
 }
 
@@ -843,6 +846,19 @@ void panelLevel(int idx) {
         toggle("No Mirror", &c.noMirror, "Disables the mirror portal effect.");
         toggle("No Particles", &c.noParticles, "Hides all particle systems.");
         toggle("Hide Pause Menu", &c.hidePauseMenu, "Makes the pause menu invisible.");
+        toggle("Accurate Percentage", &c.accuratePercent, "Shows the progress percentage with 2 decimals.");
+        toggle("Auto LDM", &c.autoLDM, "Turns on Low Detail Mode in every level.");
+        toggle("Auto Practice Mode", &c.autoPractice, "Starts every level in practice mode.");
+        toggle("Freeze Attempts", &c.freezeAttempts, "The attempt counter stops going up.");
+        toggle("Instant Mirror", &c.instantMirror, "Mirror portals flip instantly, no transition.");
+        toggle("No Camera Shake", &c.noCameraShake, "Disables every camera shake.");
+        toggle("No End Shake", &c.noEndShake, "Disables the shake when you complete a level.");
+        toggle("No Portal Lightning", &c.noPortalLightning, "Removes the lightning effect of portals.");
+        toggle("Hide Level Complete VFX", &c.hideCompleteVfx, "Hides the effect when you beat a level.");
+        toggle("Confirm Restart", &c.confirmRestart, "Asks before restarting from the pause menu.");
+        toggle("Confirm Practice Mode", &c.confirmPractice, "Asks before entering/leaving practice mode.");
+        toggle("Force Platformer", &c.forcePlatformer, "Plays every level in platformer mode (cheat).");
+        toggle("Instant Complete", &c.instantComplete, "Completes the level right away (cheat, never saves).");
     }
 }
 
@@ -855,6 +871,18 @@ void panelPlayer(int idx) {
         toggle("No Wave Trail", &c.noWaveTrail, "Hides the wave trail.");
         toggle("Respawn Delay", &c.customRespawn, "Custom time before respawning.", "##respawn");
         options("##respawn", [&] { sliderF("Delay", &c.respawnDelay, 0.f, 2.f, "%.2f s"); });
+        toggle("Jump Hack", &c.jumpHack, "Jump in mid-air (cheat).");
+        toggle("AutoClicker", &c.autoClicker, "Clicks automatically while playing (cheat).", "##clicker");
+        options("##clicker", [&] { sliderF("Clicks per second", &c.autoClickerCps, 1.f, 60.f, "%.0f CPS"); });
+        toggle("Auto Kill", &c.autoKill, "Kills the player at a chosen percentage.", "##autokill");
+        options("##autokill", [&] { sliderF("Kill at", &c.autoKillPercent, 1.f, 100.f, "%.0f%%"); });
+        toggle("No Respawn Flash", &c.noRespawnFlash, "Removes the flash when the player respawns.");
+        toggle("No Spider Dash", &c.noSpiderDash, "Removes the spider teleport effect.");
+        toggle("No Robot Fire", &c.noRobotFire, "Hides the robot jump fire.");
+        toggle("No Ghost Trail", &c.noGhostTrail, "Disables ghost trail triggers.");
+        toggle("Force Ghost Trail", &c.forceGhostTrail, "Ghost trail is always on.");
+        toggle("Solid Wave Trail", &c.solidWaveTrail, "Wave trail without transparency.");
+        toggle("Mute Music on Death", &c.muteOnDeath, "Stops the music when you die (normal mode).");
         toggle("Nick Changer", &c.nickChanger, "Shows a custom name instead of yours. Visual only, nothing is sent to the servers.", "##nick");
         options("##nick", [&] {
             if (!s_nickBufInit) {
@@ -886,6 +914,7 @@ void panelBypass(int idx) {
         toggle("Practice Music Sync", &c.practiceMusic, "Unlocks the practice music sync option.");
         toggle("Text Length Bypass", &c.textLengthBypass, "Removes text input length limits.");
         toggle("Character Filter Bypass", &c.charFilterBypass, "Allows any character in text inputs.");
+        toggle("Free Scroll", &c.freeScroll, "Scroll anywhere in the editor, no limits.");
     }
 }
 
@@ -950,10 +979,11 @@ void labelOptionsBody(int i) {
 void panelLabels(int idx) {
     auto& c = cfg();
     static char const* popupIds[kLabelCount] = {"##lbl0", "##lbl1", "##lbl2", "##lbl3", "##lbl4",
-                                                "##lbl5", "##lbl6", "##lbl7", "##lbl8"};
+                                                "##lbl5", "##lbl6", "##lbl7", "##lbl8", "##lbl9", "##lbl10"};
     static char const* tips[kLabelCount] = {
         "Red dot = cheats used this attempt, green = clean.", nullptr, "Clicks per second.", nullptr, nullptr, nullptr, nullptr,
-        "Time spent in the level this session.", nullptr};
+        "Time spent in the level this session.", nullptr,
+        "Percent the current attempt started from.", "Longest run this session (start-end)."};
 
     if (Panel p{"labels", "Labels", idx}) {
         toggle("Show Labels", &c.labels, "Master switch for all labels.", "##labels");
@@ -1148,7 +1178,12 @@ void panelShortcuts(int idx) {
         if (button("Remove Checkpoint")) defer([] {
             if (auto pl = PlayLayer::get(); pl && pl->m_isPracticeMode) pl->removeCheckpoint(false);
         });
+        if (button("Restart From Start")) defer([] {
+            if (auto pl = PlayLayer::get()) pl->resetLevelFromStart();
+        });
         if (button("Game Options")) defer([] { OptionsLayer::create()->showLayer(false); });
+        if (button("Graphics Settings")) defer([] { VideoOptionsLayer::create()->show(); });
+        if (button("Open Save Folder")) geode::utils::file::openFolder(Mod::get()->getSaveDir());
     }
 }
 

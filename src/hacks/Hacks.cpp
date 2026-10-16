@@ -2,6 +2,7 @@
 
 #include "Config.hpp"
 #include "State.hpp"
+#include "ui/Menu.hpp"
 #include "visuals/Labels.hpp"
 
 #include <Geode/Geode.hpp>
@@ -10,6 +11,7 @@
 #include <Geode/modify/CCScheduler.hpp>
 #include <Geode/modify/CCTextInputNode.hpp>
 #include <Geode/modify/CCTransitionFade.hpp>
+#include <Geode/modify/EditorUI.hpp>
 #include <Geode/modify/GameManager.hpp>
 #include <Geode/modify/GameStatsManager.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
@@ -17,6 +19,11 @@
 #include <Geode/modify/PlayerObject.hpp>
 
 #include <cmath>
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
 
 using namespace geode::prelude;
 using namespace starlight;
@@ -46,6 +53,7 @@ static void applyAudioPitch() {
     static float appliedPitch = 1.f;
     auto& c = cfg();
     float want = (c.speedhack && c.speedhackAudio) ? c.speed : 1.f;
+    if (c.pitchShift) want *= std::clamp(c.pitch, 0.1f, 4.f);
     if (want == appliedPitch) return;
     auto engine = FMODAudioEngine::sharedEngine();
     if (engine && engine->m_globalChannel) {
@@ -54,11 +62,40 @@ static void applyAudioPitch() {
     }
 }
 
+// keeps the cursor inside the game window while playing
+static void applyCursorLock() {
+    static bool locked = false;
+    bool want = false;
+    if (cfg().lockCursor && !menu::isOpen()) {
+        if (auto pl = PlayLayer::get(); pl && !pl->m_isPaused && !pl->m_hasCompletedLevel) {
+            HWND fg = GetForegroundWindow();
+            DWORD pid = 0;
+            GetWindowThreadProcessId(fg, &pid);
+            if (fg && pid == GetCurrentProcessId()) {
+                RECT r;
+                GetClientRect(fg, &r);
+                POINT tl{r.left, r.top}, br{r.right, r.bottom};
+                ClientToScreen(fg, &tl);
+                ClientToScreen(fg, &br);
+                RECT clip{tl.x, tl.y, br.x, br.y};
+                ClipCursor(&clip);
+                locked = true;
+                want = true;
+            }
+        }
+    }
+    if (!want && locked) {
+        ClipCursor(nullptr);
+        locked = false;
+    }
+}
+
 class $modify(StarlightScheduler, CCScheduler) {
     void update(float dt) {
         runDeferred();
         applyFpsBypass();
         applyAudioPitch();
+        applyCursorLock();
 
         // smoothed real fps for the label
         auto& st = state();
@@ -129,8 +166,9 @@ class $modify(StarlightTextInput, CCTextInputNode) {
 
 class $modify(StarlightBaseLayer, GJBaseGameLayer) {
     void toggleFlipped(bool flip, bool instant) {
-        if (cfg().noMirror) return;
-        GJBaseGameLayer::toggleFlipped(flip, instant);
+        auto& c = cfg();
+        if (c.noMirror) return;
+        GJBaseGameLayer::toggleFlipped(flip, instant || c.instantMirror);
     }
 
     void handleButton(bool down, int button, bool isPlayer1) {
@@ -138,8 +176,31 @@ class $modify(StarlightBaseLayer, GJBaseGameLayer) {
             auto& clicks = state().clicks;
             clicks.push_back(nowSeconds());
             while (clicks.size() > 200) clicks.pop_front();
+
+            // jump hack: pretend we're on the ground so you can jump mid-air
+            if (cfg().jumpHack && button == 1) {
+                for (auto p : {m_player1, m_player2}) {
+                    if (p) p->m_isOnGround = true;
+                }
+            }
         }
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
+    }
+
+    void shakeCamera(float duration, float strength, float interval) {
+        auto& c = cfg();
+        if (c.noCameraShake) return;
+        if (c.noEndShake) {
+            if (auto pl = PlayLayer::get(); pl && pl->m_hasCompletedLevel) return;
+        }
+        GJBaseGameLayer::shakeCamera(duration, strength, interval);
+    }
+
+    void lightningFlash(
+        CCPoint from, CCPoint to, ccColor3B color, float lineWidth, float duration, int displacement, bool flash, float opacity
+    ) {
+        if (cfg().noPortalLightning) return;
+        GJBaseGameLayer::lightningFlash(from, to, color, lineWidth, duration, displacement, flash, opacity);
     }
 };
 
@@ -147,6 +208,32 @@ class $modify(StarlightPlayerObject, PlayerObject) {
     void playDeathEffect() {
         if (cfg().noDeathEffect) return;
         PlayerObject::playDeathEffect();
+    }
+
+    void playSpawnEffect() {
+        if (cfg().noRespawnFlash) return;
+        PlayerObject::playSpawnEffect();
+    }
+
+    void playSpiderDashEffect(CCPoint from, CCPoint to) {
+        if (cfg().noSpiderDash) return;
+        PlayerObject::playSpiderDashEffect(from, to);
+    }
+
+    void toggleGhostEffect(GhostType type) {
+        auto& c = cfg();
+        if (c.noGhostTrail) type = static_cast<GhostType>(0);
+        else if (c.forceGhostTrail) type = static_cast<GhostType>(1);
+        PlayerObject::toggleGhostEffect(type);
+    }
+};
+
+// ---------------------------------------------------------------- editor
+
+class $modify(StarlightEditorUI, EditorUI) {
+    void constrainGameLayerPosition(float x, float y) {
+        if (cfg().freeScroll) return;
+        EditorUI::constrainGameLayerPosition(x, y);
     }
 };
 
@@ -174,9 +261,44 @@ class $modify(StarlightNickLabel, CCLabelBMFont) {
     }
 };
 
+// set while re-running a confirmed pause action, so the hook doesn't ask again
+static bool s_confirmed = false;
+
 class $modify(StarlightPauseLayer, PauseLayer) {
     void customSetup() {
         PauseLayer::customSetup();
         if (cfg().hidePauseMenu) this->setVisible(false);
+    }
+
+    // shows a confirm popup and re-runs `action` on "yes"
+    template <class F>
+    void sl_confirm(char const* title, char const* text, char const* yes, F&& action) {
+        Ref<PauseLayer> self = this;
+        createQuickPopup(title, text, "Cancel", yes, [self, action](FLAlertLayer*, bool ok) {
+            if (!ok) return;
+            s_confirmed = true;
+            action(self.data());
+            s_confirmed = false;
+        });
+    }
+
+    void onRestart(CCObject* sender) {
+        if (!cfg().confirmRestart || s_confirmed) return PauseLayer::onRestart(sender);
+        sl_confirm("Restart", "Restart the level?", "Restart", [sender](PauseLayer* p) { p->onRestart(sender); });
+    }
+
+    void onRestartFull(CCObject* sender) {
+        if (!cfg().confirmRestart || s_confirmed) return PauseLayer::onRestartFull(sender);
+        sl_confirm("Restart", "Restart the level from the start?", "Restart", [sender](PauseLayer* p) { p->onRestartFull(sender); });
+    }
+
+    void onPracticeMode(CCObject* sender) {
+        if (!cfg().confirmPractice || s_confirmed) return PauseLayer::onPracticeMode(sender);
+        sl_confirm("Practice", "Enter practice mode?", "Practice", [sender](PauseLayer* p) { p->onPracticeMode(sender); });
+    }
+
+    void onNormalMode(CCObject* sender) {
+        if (!cfg().confirmPractice || s_confirmed) return PauseLayer::onNormalMode(sender);
+        sl_confirm("Practice", "Leave practice mode?", "Leave", [sender](PauseLayer* p) { p->onNormalMode(sender); });
     }
 };

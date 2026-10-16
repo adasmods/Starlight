@@ -26,6 +26,9 @@ static void visit(Config& c, F&& f) {
     f("auto-safe-mode", c.autoSafeMode);
     f("custom-transition", c.customTransition);
     f("transition-time", c.transitionTime);
+    f("pitch-shift", c.pitchShift);
+    f("pitch", c.pitch);
+    f("lock-cursor", c.lockCursor);
 
     f("noclip", c.noclip);
     f("noclip-flash", c.noclipFlash);
@@ -34,6 +37,20 @@ static void visit(Config& c, F&& f) {
     f("no-mirror", c.noMirror);
     f("no-particles", c.noParticles);
     f("hide-pause-menu", c.hidePauseMenu);
+    f("accurate-percent", c.accuratePercent);
+    f("auto-ldm", c.autoLDM);
+    f("auto-practice", c.autoPractice);
+    f("freeze-attempts", c.freezeAttempts);
+    f("instant-mirror", c.instantMirror);
+    f("no-camera-shake", c.noCameraShake);
+    f("no-end-shake", c.noEndShake);
+    f("no-portal-lightning", c.noPortalLightning);
+    f("hide-complete-vfx", c.hideCompleteVfx);
+    f("confirm-restart", c.confirmRestart);
+    f("confirm-practice", c.confirmPractice);
+    f("force-platformer", c.forcePlatformer);
+    f("instant-complete", c.instantComplete);
+    f("free-scroll", c.freeScroll);
 
     f("no-death-effect", c.noDeathEffect);
     f("hide-player", c.hidePlayer);
@@ -41,6 +58,18 @@ static void visit(Config& c, F&& f) {
     f("no-wave-trail", c.noWaveTrail);
     f("custom-respawn", c.customRespawn);
     f("respawn-delay", c.respawnDelay);
+    f("jump-hack", c.jumpHack);
+    f("auto-clicker", c.autoClicker);
+    f("auto-clicker-cps", c.autoClickerCps);
+    f("auto-kill", c.autoKill);
+    f("auto-kill-percent", c.autoKillPercent);
+    f("no-respawn-flash", c.noRespawnFlash);
+    f("no-spider-dash", c.noSpiderDash);
+    f("no-robot-fire", c.noRobotFire);
+    f("no-ghost-trail", c.noGhostTrail);
+    f("force-ghost-trail", c.forceGhostTrail);
+    f("solid-wave-trail", c.solidWaveTrail);
+    f("mute-on-death", c.muteOnDeath);
     f("nick-changer", c.nickChanger);
     f("nick", c.nick);
     f("cosmic-profile", c.cosmicProfile);
@@ -145,7 +174,8 @@ void saveConfig() {
 
 bool cheatsActive() {
     auto& c = cfg();
-    return c.noclip || (c.speedhack && c.speed != 1.f) || c.showHitboxes;
+    return c.noclip || (c.speedhack && c.speed != 1.f) || c.showHitboxes || c.jumpHack || c.autoClicker || c.instantComplete ||
+           c.forcePlatformer;
 }
 
 static std::mutex s_deferMutex;

@@ -94,12 +94,12 @@ char const* fontFile(int index) {
 
 char const* labelName(int id) {
     static char const* names[kLabelCount] = {"Cheat Indicator", "FPS",     "CPS",          "Noclip Accuracy", "Noclip Deaths",
-                                             "Attempt",         "Percent", "Session Time", "Clock"};
+                                             "Attempt",         "Percent", "Session Time", "Clock",           "Run From",      "Best Run"};
     return names[std::clamp(id, 0, kLabelCount - 1)];
 }
 
 char const* sampleText(int id) {
-    static char const* samples[kLabelCount] = {"o", "240 FPS", "8 CPS", "100.00%", "0 Deaths", "Attempt 1", "42.00%", "1:23", "21:37:00"};
+    static char const* samples[kLabelCount] = {"o", "240 FPS", "8 CPS", "100.00%", "0 Deaths", "Attempt 1", "42.00%", "1:23", "21:37:00", "Run From 0%", "Best Run 0-42%"};
     return samples[std::clamp(id, 0, kLabelCount - 1)];
 }
 
@@ -246,6 +246,8 @@ void LabelsNode::refresh(float dt, PlayLayer* pl) {
         localtime_s(&tm, &t);
         texts[LabelClock] = fmt::format("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec);
     }
+    texts[LabelRunFrom] = fmt::format("Run From {:.0f}%", st.runStart);
+    texts[LabelBestRun] = fmt::format("Best Run {:.0f}-{:.0f}%", st.bestStart, st.bestEnd);
 
     // ---- layout + style
     float opacity = std::clamp(c.labelOpacity, 0.f, 1.f);

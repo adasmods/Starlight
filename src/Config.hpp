@@ -16,6 +16,8 @@ enum LabelId {
     LabelPercent,
     LabelTime,
     LabelClock,
+    LabelRunFrom,
+    LabelBestRun,
     kLabelCount,
 };
 
@@ -40,6 +42,9 @@ struct Config {
     bool autoSafeMode = true;
     bool customTransition = false;
     float transitionTime = 0.5f;
+    bool pitchShift = false;
+    float pitch = 1.f;
+    bool lockCursor = false;
 
     // ---- Level
     bool noclip = false;
@@ -49,6 +54,20 @@ struct Config {
     bool noMirror = false;
     bool noParticles = false;
     bool hidePauseMenu = false;
+    bool accuratePercent = false;
+    bool autoLDM = false;
+    bool autoPractice = false;
+    bool freezeAttempts = false;
+    bool instantMirror = false;
+    bool noCameraShake = false;
+    bool noEndShake = false;
+    bool noPortalLightning = false;
+    bool hideCompleteVfx = false;
+    bool confirmRestart = false;
+    bool confirmPractice = false;
+    bool forcePlatformer = false;
+    bool instantComplete = false;
+    bool freeScroll = false;
 
     // ---- Player
     bool noDeathEffect = false;
@@ -57,6 +76,18 @@ struct Config {
     bool noWaveTrail = false;
     bool customRespawn = false;
     float respawnDelay = 0.5f;
+    bool jumpHack = false;
+    bool autoClicker = false;
+    float autoClickerCps = 10.f;
+    bool autoKill = false;
+    float autoKillPercent = 50.f;
+    bool noRespawnFlash = false;
+    bool noSpiderDash = false;
+    bool noRobotFire = false;
+    bool noGhostTrail = false;
+    bool forceGhostTrail = false;
+    bool solidWaveTrail = false;
+    bool muteOnDeath = false;
     bool nickChanger = false;
     std::string nick = "StarLight Team";
     bool cosmicProfile = true; // gradient name + "S" badge + UID on your profile
