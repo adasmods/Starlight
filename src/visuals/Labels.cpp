@@ -96,6 +96,7 @@ char const* fontFile(int index) {
 char const* labelName(int id) {
     static char const* names[kLabelCount] = {"Cheat Indicator", "FPS",     "CPS",          "Noclip Accuracy", "Noclip Deaths",
                                              "Attempt",         "Percent", "Session Time", "Clock",           "Run From",      "Best Run",
+                                             "Custom Label 1",  "Custom Label 2", "Custom Label 3"};
     return names[std::clamp(id, 0, kLabelCount - 1)];
 }
 
