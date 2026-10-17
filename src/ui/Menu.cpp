@@ -318,11 +318,22 @@ public:
         auto& io = ImGui::GetIO();
 
         // staggered per-panel animation
-        constexpr float stagger = 0.07f;
-        float local = clamp01(s_progress * (1.f + stagger * (kPanelCount - 1)) - stagger * index);
-        m_alpha = easeOutCubic(local);
-        float slide = (1.f - easeOutBack(local)) * 46.f * s;
-        bool animating = local < 1.f;
+        float slide;
+        bool animating;
+        if (s_open) {
+            // opening: panels cascade in and settle with a small bounce
+            constexpr float stagger = 0.07f;
+            float local = clamp01(s_progress * (1.f + stagger * (kPanelCount - 1)) - stagger * index);
+            m_alpha = easeOutCubic(local);
+            slide = (1.f - easeOutBack(local)) * 46.f * s;
+            animating = local < 1.f;
+        } else {
+            // closing: every panel fades and lifts away together, quick and smooth
+            float k = smooth(s_progress);
+            m_alpha = k * k;
+            slide = -(1.f - k) * 22.f * s;
+            animating = true;
+        }
 
         if (animating || !m_st->placed || m_st->wasAnimating) {
             ImGui::SetNextWindowPos(m_st->pos + ImVec2(0.f, animating ? slide : 0.f), ImGuiCond_Always);
@@ -1363,7 +1374,8 @@ void setup() {
 }
 
 void draw() {
-    float step = cfg().animations ? dt() / 0.5f : 1.f;
+    // opening takes 0.5 s (cascade), closing only 0.22 s so nothing lingers on screen
+    float step = cfg().animations ? dt() / (s_open ? 0.5f : 0.22f) : 1.f;
     s_progress = approach(s_progress, s_open ? 1.f : 0.f, step);
     if (!s_open && s_progress <= 0.f) {
         ImGuiCocos::get().setVisible(false);
@@ -1379,7 +1391,7 @@ void draw() {
         saveAll();
     }
 
-    float g = easeOutCubic(s_progress);
+    float g = s_open ? easeOutCubic(s_progress) : smooth(s_progress) * smooth(s_progress);
 
     if (s_editLabels) {
         // light dim only, so the level stays visible while placing labels
