@@ -149,6 +149,7 @@ static void visit(Config& c, F&& f) {
     f("animations", c.animations);
     f("starfield", c.starfield);
     f("bg-dim", c.bgDim);
+    f("auto-arrange", c.autoArrange);
 
     f("menu-key", c.menuKey);
     f("noclip-key", c.noclipKey);

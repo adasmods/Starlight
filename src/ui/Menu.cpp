@@ -34,8 +34,15 @@ float s_progress = 0.f; // 0 = closed, 1 = fully open (linear, eased per element
 float s_saveTimer = 0.f;
 int* s_capturing = nullptr; // keybind waiting for a key
 char s_search[64] = "";
+std::string s_lastSearch;
+int s_searchVersion = 0;
+int s_matchCount = 0;
+bool s_panelTitleMatch = false;
+bool s_searchLayoutDirty = false;
 bool s_inPopup = false;
 bool s_layoutReady = false;
+bool s_layoutFromEstimates = false;
+ImVec2 s_lastDisplay{};
 bool s_editLabels = false;
 char s_nickBuf[64] = "";
 bool s_nickBufInit = false;
@@ -123,9 +130,16 @@ std::string lower(std::string s) {
     return s;
 }
 
+bool directHit(char const* label) {
+    return s_search[0] && !s_inPopup && lower(label).find(lower(s_search)) != std::string::npos;
+}
+
+// search filter for every widget; counts hits so empty panels can be hidden
 bool matches(char const* label) {
     if (s_inPopup || !s_search[0]) return true;
-    return lower(label).find(lower(s_search)) != std::string::npos;
+    bool ok = s_panelTitleMatch || directHit(label);
+    if (ok) s_matchCount++;
+    return ok;
 }
 
 ImFont* boldFont() { return s_fontBold ? s_fontBold : ImGui::GetFont(); }
@@ -250,7 +264,7 @@ void applyTheme() {
 struct PanelDef {
     char const* id;
     char const* title;
-    int rows; // rough height estimate for default layout
+    int rows; // height estimate, used only until the real height is measured
 };
 
 constexpr PanelDef kPanels[] = {
@@ -260,54 +274,101 @@ constexpr PanelDef kPanels[] = {
     {"keybinds", "Keybinds", 11}, {"interface", "Interface", 9}, {"shortcuts", "Shortcuts", 8},
 };
 constexpr int kPanelCount = sizeof(kPanels) / sizeof(kPanels[0]);
+constexpr int kLayoutVersion = 2; // bump to drop old saved positions
 
 struct PanelState {
-    ImVec2 pos{};
-    bool placed = false;      // pos pushed to imgui at least once
-    bool wasAnimating = false;
+    ImVec2 pos{};          // where it is drawn now (eases toward the target)
+    ImVec2 home{};         // normal position (auto layout or where the user dragged it)
+    ImVec2 searchPos{};    // packed position while searching
+    bool hasPos = false;
+    bool hasSearchPos = false;
     bool collapsed = false;
     bool dragged = false;
+    float height = 0.f;    // measured window height (last frame)
+    bool measured = false;
+    float layoutHeight = 0.f;
+    int matches = -1;      // search hits in this panel
+    int matchVersion = -1; // search version those hits belong to
 };
 std::unordered_map<std::string, PanelState> s_panels;
 
 float panelWidth() { return 232.f * S(); }
+float panelsTop() { return 142.f * S(); }
 
-void computeLayout(bool force) {
+bool searching() { return s_search[0] != 0; }
+
+float panelHeightForLayout(PanelState const& st, PanelDef const& def) {
+    return st.measured ? st.height : (34.f + def.rows * 28.f + 12.f) * S();
+}
+
+// Greedy masonry: each panel goes into the currently shortest column.
+void packPanels(bool searchMode) {
     ImVec2 ds = ImGui::GetIO().DisplaySize;
     float s = S();
     float pw = panelWidth(), gap = 12.f * s;
-    int cols = std::max(1, static_cast<int>((ds.x - 24.f * s + gap) / (pw + gap)));
-    cols = std::min(cols, kPanelCount);
-    float total = cols * pw + (cols - 1) * gap;
-    float startX = std::max(8.f * s, (ds.x - total) * 0.5f);
-    std::vector<float> bottoms(cols, 86.f * s);
-
+    std::vector<PanelDef const*> list;
     for (auto const& def : kPanels) {
         auto& st = s_panels[def.id];
+        if (searchMode && st.matches == 0) continue;
+        list.push_back(&def);
+    }
+    int cols = std::max(1, static_cast<int>((ds.x - 24.f * s + gap) / (pw + gap)));
+    cols = std::max(1, std::min(cols, static_cast<int>(list.size())));
+    float total = cols * pw + (cols - 1) * gap;
+    float startX = std::max(8.f * s, (ds.x - total) * 0.5f);
+    std::vector<float> bottoms(cols, panelsTop());
+    for (auto def : list) {
+        auto& st = s_panels[def->id];
         int col = static_cast<int>(std::min_element(bottoms.begin(), bottoms.end()) - bottoms.begin());
-        ImVec2 pos{startX + col * (pw + gap), bottoms[col]};
-        bottoms[col] += (34.f + def.rows * 28.f + 12.f) * s + gap;
-
-        auto keyX = fmt::format("panel-{}-x", def.id);
-        auto keyY = fmt::format("panel-{}-y", def.id);
-        if (!force && Mod::get()->hasSavedValue(keyX)) {
-            pos.x = static_cast<float>(Mod::get()->getSavedValue<double>(keyX, pos.x));
-            pos.y = static_cast<float>(Mod::get()->getSavedValue<double>(keyY, pos.y));
-            st.collapsed = Mod::get()->getSavedValue<bool>(fmt::format("panel-{}-collapsed", def.id), false);
+        ImVec2 pos{startX + col * (pw + gap), bottoms.at(col)};
+        float h = panelHeightForLayout(st, *def);
+        bottoms.at(col) += h + gap;
+        if (searchMode) {
+            st.searchPos = pos;
+            if (!st.hasSearchPos) st.hasSearchPos = true;
+        } else {
+            st.home = pos;
+            st.layoutHeight = h;
         }
-        if (force) st.collapsed = false;
-        st.pos = pos;
-        st.placed = false;
+        if (!st.hasPos) {
+            st.pos = pos;
+            st.hasPos = true;
+        }
+    }
+}
+
+void computeLayout(bool force) {
+    auto mod = Mod::get();
+    bool savedValid = mod->getSavedValue<int>("layout-version", 0) == kLayoutVersion;
+    bool useSaved = !force && savedValid && !cfg().autoArrange;
+    packPanels(false);
+    s_layoutFromEstimates = false;
+    for (auto const& def : kPanels) {
+        if (!s_panels[def.id].measured) s_layoutFromEstimates = true;
+    }
+    for (auto const& def : kPanels) {
+        auto& st = s_panels[def.id];
+        auto keyX = fmt::format("panel-{}-x", def.id);
+        if (savedValid && mod->hasSavedValue(keyX) && !force) {
+            st.collapsed = mod->getSavedValue<bool>(fmt::format("panel-{}-collapsed", def.id), false);
+        }
+        if (useSaved && mod->hasSavedValue(keyX)) {
+            st.home.x = static_cast<float>(mod->getSavedValue<double>(keyX, st.home.x));
+            st.home.y = static_cast<float>(mod->getSavedValue<double>(fmt::format("panel-{}-y", def.id), st.home.y));
+            st.pos = st.home;
+        }
     }
     s_layoutReady = true;
 }
 
 void saveAll() {
     saveConfig();
+    auto mod = Mod::get();
+    mod->setSavedValue<int>("layout-version", kLayoutVersion);
     for (auto const& [id, st] : s_panels) {
-        Mod::get()->setSavedValue<double>(fmt::format("panel-{}-x", id), st.pos.x);
-        Mod::get()->setSavedValue<double>(fmt::format("panel-{}-y", id), st.pos.y);
-        Mod::get()->setSavedValue<bool>(fmt::format("panel-{}-collapsed", id), st.collapsed);
+        mod->setSavedValue<double>(fmt::format("panel-{}-x", id), st.home.x);
+        mod->setSavedValue<double>(fmt::format("panel-{}-y", id), st.home.y);
+        mod->setSavedValue<bool>(fmt::format("panel-{}-collapsed", id), st.collapsed);
     }
 }
 
@@ -316,39 +377,51 @@ public:
     Panel(char const* id, char const* title, int index) : m_st(&s_panels[id]) {
         float s = S();
         auto& io = ImGui::GetIO();
+        bool search = searching();
 
-        // staggered per-panel animation
+        // while searching, a panel known to have no hits is not drawn at all
+        if (search && m_st->matchVersion == s_searchVersion && m_st->matches == 0) {
+            m_skip = true;
+            return;
+        }
+        bool measuring = search && m_st->matchVersion != s_searchVersion;
+
+        // ease toward the target position (layout changes and search results glide into place)
+        ImVec2 target = (search && m_st->hasSearchPos) ? m_st->searchPos : m_st->home;
+        if (!m_st->hasPos) {
+            m_st->pos = target;
+            m_st->hasPos = true;
+        }
+        if (!m_st->dragged) {
+            float k = 1.f - std::exp(-dt() * 14.f);
+            m_st->pos = m_st->pos + (target - m_st->pos) * k;
+        }
+
         float slide;
-        bool animating;
         if (s_open) {
             // opening: panels cascade in and settle with a small bounce
             constexpr float stagger = 0.07f;
             float local = clamp01(s_progress * (1.f + stagger * (kPanelCount - 1)) - stagger * index);
             m_alpha = easeOutCubic(local);
             slide = (1.f - easeOutBack(local)) * 46.f * s;
-            animating = local < 1.f;
         } else {
             // closing: every panel fades and lifts away together, quick and smooth
             float k = smooth(s_progress);
             m_alpha = k * k;
             slide = -(1.f - k) * 22.f * s;
-            animating = true;
         }
+        if (measuring) m_alpha = 0.f; // counted this frame, shown from the next one
 
-        if (animating || !m_st->placed || m_st->wasAnimating) {
-            ImGui::SetNextWindowPos(m_st->pos + ImVec2(0.f, animating ? slide : 0.f), ImGuiCond_Always);
-            m_st->placed = true;
-        }
-        m_st->wasAnimating = animating;
-        m_animating = animating;
-
-        ImGui::SetNextWindowSizeConstraints({panelWidth(), 0.f}, {panelWidth(), FLT_MAX});
+        ImGui::SetNextWindowPos(m_st->pos + ImVec2(0.f, slide), ImGuiCond_Always);
+        float maxH = std::max(160.f * s, io.DisplaySize.y - m_st->pos.y - 12.f * s);
+        ImGui::SetNextWindowSizeConstraints({panelWidth(), 0.f}, {panelWidth(), maxH});
         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, std::max(m_alpha, 0.001f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 5.f * s);
         auto name = fmt::format("{}##starlight-{}", title, id);
         ImGui::Begin(
             name.c_str(), nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar |
-                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove
         );
 
         ImVec2 wp = ImGui::GetWindowPos();
@@ -357,6 +430,7 @@ public:
         float r = ImGui::GetStyle().WindowRounding;
         float t = static_cast<float>(ImGui::GetTime());
         auto* dl = ImGui::GetWindowDrawList();
+        m_header = hh;
 
         // header: rounded base + gradient + moving shimmer
         dl->AddRectFilled(wp, wp + ImVec2(ww, hh), u32(mix(accent(), {0, 0, 0, 1}, 0.25f)), r, ImDrawFlags_RoundCornersTop);
@@ -372,9 +446,11 @@ public:
         dl->PopClipRect();
         dl->AddLine({wp.x, wp.y + hh}, {wp.x + ww, wp.y + hh}, u32(withA(kWhite, 0.22f)));
 
+        m_collapsedView = m_st->collapsed && !search;
+
         // collapse arrow (rotates)
-        float& rot = anim(ImGui::GetID("##arrow"), m_st->collapsed ? 1.f : 0.f);
-        rot = approach(rot, m_st->collapsed ? 1.f : 0.f, dt() * 8.f);
+        float& rot = anim(ImGui::GetID("##arrow"), m_collapsedView ? 1.f : 0.f);
+        rot = approach(rot, m_collapsedView ? 1.f : 0.f, dt() * 8.f);
         {
             ImVec2 c{wp.x + 15.f * s, wp.y + hh * 0.5f};
             float a = -kPi * 0.5f * smooth(rot);
@@ -394,26 +470,44 @@ public:
         float tw = 0.5f + 0.5f * std::sin(t * 2.2f + index);
         sparkle(dl, {tp.x - 11.f * s, wp.y + hh * 0.5f}, (4.f + 1.5f * tw) * s, u32(withA(kWhite, 0.6f + 0.4f * tw)));
 
-        // header interaction: drag to move, click to collapse
+        // header: drag to move (turns auto arrange off), click to collapse
         ImGui::SetCursorScreenPos(wp);
         ImGui::InvisibleButton("##header", {ww, hh});
-        if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.f)) {
+        if (!search && ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.f)) {
             m_st->dragged = true;
-            ImGui::SetWindowPos(ImGui::GetWindowPos() + io.MouseDelta);
+            m_st->pos = m_st->pos + io.MouseDelta;
+            m_st->home = m_st->pos;
+            cfg().autoArrange = false;
         }
         if (ImGui::IsItemDeactivated()) {
-            if (!m_st->dragged) m_st->collapsed = !m_st->collapsed;
+            if (!m_st->dragged && !search) m_st->collapsed = !m_st->collapsed;
             m_st->dragged = false;
         }
 
-        ImGui::SetCursorScreenPos(wp + ImVec2(ImGui::GetStyle().WindowPadding.x, hh + 6.f * s));
-        if (m_st->collapsed) ImGui::Dummy({0.f, 0.f});
+        // search bookkeeping: count hits inside this panel; a title hit shows the whole panel
+        s_matchCount = 0;
+        m_titleHit = search && lower(title).find(lower(s_search)) != std::string::npos;
+        s_panelTitleMatch = m_titleHit;
+
+        // content scrolls under the fixed header when the panel is taller than the screen
+        ImGui::SetCursorPos({ImGui::GetStyle().WindowPadding.x, hh + 6.f * s});
+        ImGui::PushClipRect(wp + ImVec2(0.f, hh), wp + ImGui::GetWindowSize(), true);
+        if (m_collapsedView) ImGui::Dummy({0.f, 0.f});
     }
 
     ~Panel() {
+        if (m_skip) return;
         float s = S();
-        if (!m_st->collapsed) ImGui::Dummy({0.f, 4.f * s});
-        if (!m_animating) m_st->pos = ImGui::GetWindowPos();
+        if (!m_collapsedView) ImGui::Dummy({0.f, 4.f * s});
+        ImGui::PopClipRect();
+
+        if (searching()) {
+            m_st->matches = s_matchCount + (m_titleHit ? 1 : 0);
+            m_st->matchVersion = s_searchVersion;
+        }
+        s_panelTitleMatch = false;
+        m_st->height = ImGui::GetWindowHeight();
+        m_st->measured = true;
 
         // soft outer glow drawn behind every window
         ImVec2 wp = ImGui::GetWindowPos(), sz = ImGui::GetWindowSize();
@@ -427,10 +521,10 @@ public:
         }
 
         ImGui::End();
-        ImGui::PopStyleVar();
+        ImGui::PopStyleVar(2);
     }
 
-    explicit operator bool() const { return !m_st->collapsed; }
+    explicit operator bool() const { return !m_skip && !m_collapsedView; }
 
     Panel(Panel const&) = delete;
     Panel& operator=(Panel const&) = delete;
@@ -438,8 +532,112 @@ public:
 private:
     PanelState* m_st;
     float m_alpha = 1.f;
-    bool m_animating = false;
+    float m_header = 0.f;
+    bool m_skip = false;
+    bool m_collapsedView = false;
+    bool m_titleHit = false;
 };
+
+// Re-arranges panels when their real heights change (auto arrange), after the first
+// measurement, when the window is resized, and packs search results.
+void updateLayout() {
+    ImVec2 ds = ImGui::GetIO().DisplaySize;
+    bool allMeasured = true;
+    for (auto const& def : kPanels) {
+        if (!s_panels[def.id].measured) allMeasured = false;
+    }
+
+    if (searching()) {
+        if (s_searchLayoutDirty) {
+            bool counted = true;
+            for (auto const& def : kPanels) {
+                if (s_panels[def.id].matchVersion != s_searchVersion) counted = false;
+            }
+            if (counted) {
+                packPanels(true);
+                s_searchLayoutDirty = false;
+            }
+        }
+        return;
+    }
+
+    bool resized = std::abs(ds.x - s_lastDisplay.x) > 1.f || std::abs(ds.y - s_lastDisplay.y) > 1.f;
+    s_lastDisplay = ds;
+    if (!cfg().autoArrange) return;
+
+    bool changed = resized || (allMeasured && s_layoutFromEstimates);
+    for (auto const& def : kPanels) {
+        auto const& st = s_panels[def.id];
+        if (st.measured && std::abs(st.height - st.layoutHeight) > 2.f) changed = true;
+    }
+    if (changed) {
+        packPanels(false);
+        s_layoutFromEstimates = !allMeasured;
+    }
+}
+
+// Search bar under the logo: filters every panel at once.
+void drawSearchBar(float g) {
+    float s = S();
+    ImVec2 ds = ImGui::GetIO().DisplaySize;
+    float w = 380.f * s, h = 32.f * s;
+    ImVec2 p{(ds.x - w) * 0.5f, 88.f * s};
+
+    ImGui::SetNextWindowPos(p);
+    ImGui::SetNextWindowSize({w, h + 24.f * s});
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, std::max(g, 0.001f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.f, 0.f});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+    ImGui::Begin(
+        "##starlight-search", nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar
+    );
+    auto* dl = ImGui::GetWindowDrawList();
+    bool focused = ImGui::IsWindowFocused();
+    float& f = anim(ImGui::GetID("##searchfocus"), 0.f);
+    f = approach(f, (focused || searching()) ? 1.f : 0.f, dt() * 8.f);
+
+    dl->AddRectFilled(p, p + ImVec2(w, h), u32(withA(kPanel, 0.95f)), h * 0.5f);
+    if (f > 0.f) {
+        float e = 3.f * s * f;
+        dl->AddRect(p - ImVec2(e, e), p + ImVec2(w + e, h + e), u32(accent(0.2f * f)), h * 0.5f + e, 0, 2.f * s);
+    }
+    dl->AddRect(p, p + ImVec2(w, h), u32(accent(0.35f + 0.5f * f)), h * 0.5f, 0, 1.2f * s);
+
+    // magnifier
+    ImVec2 c{p.x + 18.f * s, p.y + h * 0.5f - 1.f * s};
+    dl->AddCircle(c, 5.5f * s, u32(mix(kTextDim, accent(), f)), 16, 1.6f * s);
+    dl->AddLine(c + ImVec2(4.f, 4.f) * s, c + ImVec2(8.5f, 8.5f) * s, u32(mix(kTextDim, accent(), f)), 1.8f * s);
+
+    float frameH = ImGui::GetFrameHeight();
+    ImGui::SetCursorScreenPos({p.x + 32.f * s, p.y + (h - frameH) * 0.5f});
+    ImGui::SetNextItemWidth(w - 48.f * s);
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0, 0, 0, 0));
+    if (ImGui::IsKeyDown(ImGuiMod_Ctrl) && ImGui::IsKeyPressed(ImGuiKey_F, false)) ImGui::SetKeyboardFocusHere();
+    ImGui::InputTextWithHint("##search", "Search features...  (Ctrl+F)", s_search, sizeof(s_search), ImGuiInputTextFlags_EscapeClearsAll);
+    ImGui::PopStyleColor(3);
+
+    if (searching()) {
+        int total = 0;
+        bool counted = true;
+        for (auto const& def : kPanels) {
+            auto const& st = s_panels[def.id];
+            if (st.matchVersion != s_searchVersion) counted = false;
+            else total += std::max(0, st.matches);
+        }
+        if (counted) {
+            auto text = total == 0 ? std::string("No matching features") : fmt::format("{} matching {}", total, total == 1 ? "feature" : "features");
+            float ts = 12.f * s;
+            ImVec2 sz = textSize(regularFont(), ts, text.c_str());
+            dl->AddText(regularFont(), ts, {p.x + (w - sz.x) * 0.5f, p.y + h + 5.f * s}, u32(total == 0 ? kTextDim : accent()), text.c_str());
+        }
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(3);
+}
 
 // ============================================================================
 //  Widgets
@@ -508,6 +706,10 @@ bool toggle(char const* label, bool* v, char const* tip = nullptr, char const* p
 
     float fs = ImGui::GetFontSize();
     ImVec4 tc = mix(kTextDim, kText, std::max(on, ho * 0.6f));
+    if (directHit(label)) {
+        tc = mix(tc, accent(), 0.7f);
+        dl->AddRectFilled(p, p + ImVec2(w, h), u32(accent(0.07f)), 4.f * s);
+    }
     dl->AddText({p.x + (10.f + 2.f * on) * s, p.y + (h - fs) * 0.5f}, u32(tc), label);
 
     // pill switch
@@ -1307,17 +1509,16 @@ void drawLabelEditor(float g) {
 void panelInterface(int idx) {
     auto& c = cfg();
     if (Panel p{"interface", "Interface", idx}) {
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        {
-            PadScope pad(8.f, 6.f);
-            ImGui::InputTextWithHint("##search", "Search options...", s_search, sizeof(s_search));
-        }
         colorRow("Accent Color", c.accent);
         sliderF("UI Scale", &c.uiScale, 0.75f, 1.5f, "%.2fx");
         toggle("Animations", &c.animations, "Animated opening and closing.");
         toggle("Starfield Backdrop", &c.starfield, "Stars and nebula behind the menu.");
         sliderF("Background Dim", &c.bgDim, 0.f, 0.9f, "%.2f");
-        if (button("Reset Layout")) computeLayout(true);
+        toggle("Auto Arrange", &c.autoArrange, "Keeps panels packed on screen without overlapping. Dragging a panel turns it off.");
+        if (button("Arrange Now")) {
+            c.autoArrange = true;
+            computeLayout(true);
+        }
         if (button("Save Settings")) saveAll();
     }
 }
@@ -1400,8 +1601,16 @@ void draw() {
         return;
     }
 
+    if (s_lastSearch != s_search) {
+        s_lastSearch = s_search;
+        s_searchVersion++;
+        s_searchLayoutDirty = true;
+        for (auto& [id, st] : s_panels) st.hasSearchPos = false;
+    }
+
     drawBackdrop(g);
     drawLogo(g);
+    drawSearchBar(g);
 
     int i = 0;
     panelGlobal(i++);
@@ -1416,6 +1625,8 @@ void draw() {
     panelKeybinds(i++);
     panelInterface(i++);
     panelShortcuts(i++);
+
+    updateLayout();
 }
 
 void toggle() {

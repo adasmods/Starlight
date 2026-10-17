@@ -163,6 +163,7 @@ struct Config {
     bool animations = true;
     bool starfield = true;
     float bgDim = 0.45f;
+    bool autoArrange = true;
 
     // ---- Keybinds (cocos2d::enumKeyCodes, 0 = none)
     int menuKey = 0x09; // KEY_Tab
