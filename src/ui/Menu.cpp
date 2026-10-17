@@ -268,10 +268,11 @@ struct PanelDef {
 };
 
 constexpr PanelDef kPanels[] = {
-    {"global", "Global", 9},     {"level", "Level", 29},        {"player", "Player", 17},
-    {"bypass", "Bypass", 6},     {"bot", "Bot", 10},            {"recorder", "Recorder", 8},
-    {"discord", "Discord", 5},   {"visuals", "Visuals", 14},    {"labels", "Labels", 16},
-    {"keybinds", "Keybinds", 11}, {"interface", "Interface", 9}, {"shortcuts", "Shortcuts", 8},
+    {"global", "Global", 9},     {"level", "Level", 32},        {"cosmetic", "Cosmetic", 13},
+    {"player", "Player", 17},    {"bypass", "Bypass", 6},       {"bot", "Bot", 10},
+    {"recorder", "Recorder", 8}, {"discord", "Discord", 5},     {"visuals", "Visuals", 14},
+    {"labels", "Labels", 19},    {"keybinds", "Keybinds", 14},  {"interface", "Interface", 9},
+    {"shortcuts", "Shortcuts", 14},
 };
 constexpr int kPanelCount = sizeof(kPanels) / sizeof(kPanels[0]);
 constexpr int kLayoutVersion = 2; // bump to drop old saved positions
@@ -688,13 +689,34 @@ bool toggle(char const* label, bool* v, char const* tip = nullptr, char const* p
         optHov = ImGui::IsItemHovered();
     }
 
-    float& on = anim(id, *v ? 1.f : 0.f);
-    on = approach(on, *v ? 1.f : 0.f, dt() * 7.f);
+    // knob position runs on a damped spring: it glides, overshoots a touch and settles
+    float target = *v ? 1.f : 0.f;
+    float& knob = anim(id, target);
+    float& vel = anim(id ^ 0xbeefu, 0.f);
+    {
+        float step = dt();
+        vel += (target - knob) * 320.f * step;
+        vel *= std::exp(-22.f * step);
+        knob += vel * step;
+        if (std::abs(target - knob) < 0.0005f && std::abs(vel) < 0.01f) {
+            knob = target;
+            vel = 0.f;
+        }
+    }
+    float on = clamp01(knob);
     float& ho = anim(id ^ 0x5eedu, 0.f);
     ho = approach(ho, (hov || optHov) ? 1.f : 0.f, dt() * 9.f);
+    // short accent flash across the row when switched
+    float& flash = anim(id ^ 0xf1a5u, 0.f);
+    if (changed) flash = 1.f;
+    flash = std::max(0.f, flash - dt() * 3.f);
 
     auto* dl = ImGui::GetWindowDrawList();
     if (ho > 0.f) dl->AddRectFilled(p, p + ImVec2(w, h), u32(accent(0.10f * ho)), 4.f * s);
+    if (flash > 0.f) {
+        float fw = w * (0.35f + 0.65f * (1.f - flash));
+        dl->AddRectFilledMultiColor(p, p + ImVec2(fw, h), u32(accent(0.22f * flash)), u32(accent(0.f)), u32(accent(0.f)), u32(accent(0.22f * flash)));
+    }
 
     // left accent bar (grows when enabled)
     if (on > 0.f) {
@@ -720,8 +742,14 @@ bool toggle(char const* label, bool* v, char const* tip = nullptr, char const* p
         float e = 1.5f * s;
         dl->AddRect(sp - ImVec2(e, e), sp + ImVec2(sw + e, sh + e), u32(accent(0.35f * on)), sh * 0.5f + e, 0, e);
     }
-    float kx = sp.x + sh * 0.5f + (sw - sh) * smooth(on);
-    dl->AddCircleFilled({kx, sp.y + sh * 0.5f}, sh * 0.5f - 2.5f * s, u32(mix({0.72f, 0.68f, 0.84f, 1.f}, kWhite, on)), 20);
+    // knob: follows the spring (slight overshoot) and stretches while it moves
+    float kr = sh * 0.5f - 2.5f * s;
+    float kx = sp.x + sh * 0.5f + (sw - sh) * std::clamp(knob, -0.08f, 1.08f);
+    float stretch = std::min(std::abs(vel) * 0.9f * s, 5.f * s);
+    float ky = sp.y + sh * 0.5f;
+    ImU32 knobCol = u32(mix({0.72f, 0.68f, 0.84f, 1.f}, kWhite, on));
+    if (on > 0.05f) dl->AddCircleFilled({kx, ky}, kr + 3.f * s, u32(accent(0.25f * on)), 20);
+    dl->AddRectFilled({kx - kr - stretch * 0.5f, ky - kr}, {kx + kr + stretch * 0.5f, ky + kr}, knobCol, kr);
 
     // options arrow
     if (popup) {
@@ -1092,6 +1120,9 @@ void panelLevel(int idx) {
         toggle("Confirm Practice Mode", &c.confirmPractice, "Asks before entering/leaving practice mode.");
         toggle("Force Platformer", &c.forcePlatformer, "Plays every level in platformer mode (cheat).");
         toggle("Instant Complete", &c.instantComplete, "Completes the level right away (cheat, never saves).");
+        toggle("Startpos Switcher", &c.startposSwitcher, "Switch between start positions with the keys set in Keybinds (default Q / E).");
+        toggle("Confirm Exit", &c.confirmExit, "Asks before leaving the level from the pause menu.");
+        toggle("Dual Clicks", &c.dualClicks, "In dual mode one click controls both players.");
         toggle("Frame Stepper", &c.frameStepper, "Freezes the level; press the Step key (Keybinds) to advance one tick, hold to go slowly.");
         toggle("Pause Countdown", &c.pauseCountdown, "3-2-1 countdown before the game resumes.");
         toggle("No Shaders", &c.noShaders, "Disables shader triggers (re-enter the level).");
@@ -1109,6 +1140,26 @@ void panelLevel(int idx) {
         toggle("Legacy Gravity Bug", &c.legacyGravityBug, "Brings back the old gravity bug behaviour.");
         toggle("Legacy Negative Scale", &c.legacyNegativeScale, "Old handling of negatively scaled objects.");
         toggle("Legacy Radius Collision", &c.legacyRadiusCollision, "Old circle hitbox collision.");
+    }
+}
+
+void panelCosmetic(int idx) {
+    auto& c = cfg();
+    if (Panel p{"cosmetic", "Cosmetic", idx}) {
+        toggle("No Circle Effects", &c.noCircleEffects, "Removes the circles from portals, orbs, pads and coins.");
+        toggle("No Exit Dual Effect", &c.noExitDualEffect, "No effect when leaving dual mode.");
+        toggle("No New Best Popup", &c.noNewBest, "Hides the New Best popup after dying.");
+        toggle("Hide Attempts", &c.hideAttempts, "Hides the Attempt counter in the level.");
+        toggle("Show Total Attempts", &c.showTotalAttempts, "The Attempt counter shows the level's total attempts.");
+        toggle("Hide Pause Button", &c.hidePauseButton, "Hides the pause button in the corner.");
+        toggle("No Swing Fire", &c.noSwingFire, "Hides the swing copter fire.");
+        toggle("Rainbow Icon", &c.rainbowIcon, "Your icon and trail cycle through colours.", "##rainbow");
+        options("##rainbow", [&] { sliderF("Speed", &c.rainbowSpeed, 0.1f, 5.f, "%.2fx"); });
+        toggle("Trail Always On", &c.trailAlwaysOn, "The regular trail is always visible.");
+        toggle("No Camera Zoom", &c.noCameraZoom, "Ignores zoom triggers.");
+        toggle("No Camera Move", &c.noCameraMove, "Ignores camera offset triggers.");
+        toggle("Hide Achievements", &c.hideAchievements, "No achievement popups.");
+        toggle("No Short Numbers", &c.noShortNumbers, "Shows 12345 instead of 12.3K.");
     }
 }
 
@@ -1208,6 +1259,21 @@ void panelVisuals(int idx) {
 // per-label settings (used by the Labels panel and by the label editor)
 void labelOptionsBody(int i) {
     auto& L = cfg().lbl[i];
+    if (i >= LabelCustom1 && i <= LabelCustom3) {
+        static char bufs[3][160] = {};
+        static bool init[3] = {};
+        int k = i - LabelCustom1;
+        if (!init[k]) {
+            std::strncpy(bufs[k], cfg().customLabels[k].c_str(), sizeof(bufs[k]) - 1);
+            init[k] = true;
+        }
+        smallLabel("Text");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::InputText("##customtext", bufs[k], sizeof(bufs[k]))) cfg().customLabels[k] = bufs[k];
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 230.f * S());
+        smallLabel("{fps} {cps} {attempt} {total} {percent} {deaths} {accuracy} {time} {clock} {level} {best} {runfrom} {startpos} {speed}");
+        ImGui::PopTextWrapPos();
+    }
     static char const* aligns[] = {"Left", "Center", "Right"};
     combo("Alignment", &L.align, aligns, 3);
 
@@ -1230,11 +1296,12 @@ void labelOptionsBody(int i) {
 void panelLabels(int idx) {
     auto& c = cfg();
     static char const* popupIds[kLabelCount] = {"##lbl0", "##lbl1", "##lbl2", "##lbl3", "##lbl4",
-                                                "##lbl5", "##lbl6", "##lbl7", "##lbl8", "##lbl9", "##lbl10"};
+                                                "##lbl5", "##lbl6", "##lbl7", "##lbl8", "##lbl9", "##lbl10", "##lbl11", "##lbl12", "##lbl13"};
     static char const* tips[kLabelCount] = {
         "Red dot = cheats used this attempt, green = clean.", nullptr, "Clicks per second.", nullptr, nullptr, nullptr, nullptr,
         "Time spent in the level this session.", nullptr,
-        "Percent the current attempt started from.", "Longest run this session (start-end)."};
+        "Percent the current attempt started from.", "Longest run this session (start-end).",
+        "Your own text with {variables}.", "Your own text with {variables}.", "Your own text with {variables}."};
 
     if (Panel p{"labels", "Labels", idx}) {
         toggle("Show Labels", &c.labels, "Master switch for all labels.", "##labels");
@@ -1374,6 +1441,9 @@ void panelKeybinds(int idx) {
         keybind("Step Key", &c.stepKey);
         keybind("Teleport Key", &c.teleportKey);
         keybind("Record Key", &c.recordKey);
+        keybind("Previous Start Pos", &c.prevStartPosKey);
+        keybind("Next Start Pos", &c.nextStartPosKey);
+        keybind("Editor UI Key", &c.editorUiKey);
     }
 }
 
@@ -1543,6 +1613,33 @@ void panelShortcuts(int idx) {
         if (button("Game Options")) defer([] { OptionsLayer::create()->showLayer(false); });
         if (button("Graphics Settings")) defer([] { VideoOptionsLayer::create()->show(); });
         if (button("Open Save Folder")) geode::utils::file::openFolder(Mod::get()->getSaveDir());
+        if (button("Quests")) defer([] { ChallengesPage::create()->show(); });
+        if (button("Reset Volume")) defer([] {
+            auto engine = FMODAudioEngine::sharedEngine();
+            engine->setBackgroundMusicVolume(1.f);
+            engine->setEffectsVolume(1.f);
+        });
+        if (button("Uncomplete Level")) defer([] {
+            auto pl = PlayLayer::get();
+            if (!pl || !pl->m_level) return;
+            Ref<GJGameLevel> level = pl->m_level;
+            createQuickPopup("Uncomplete", "Reset this level's completion and best percent?", "Cancel", "Reset", [level](FLAlertLayer*, bool ok) {
+                if (!ok) return;
+                GameStatsManager::sharedState()->uncompleteLevel(level);
+                level->m_normalPercent = 0;
+                level->m_newNormalPercent2 = 0;
+                level->m_practicePercent = 0;
+            });
+        });
+        if (button("Toggle Editor UI")) defer([] {
+            if (auto editor = LevelEditorLayer::get(); editor && editor->m_editorUI) {
+                static bool hidden = false;
+                hidden = !hidden;
+                editor->m_editorUI->showUI(!hidden);
+            }
+        });
+        if (button("GD Save Folder")) geode::utils::file::openFolder(geode::dirs::getSaveDir());
+        if (button("Resources Folder")) geode::utils::file::openFolder(geode::dirs::getGameDir() / "Resources");
     }
 }
 
@@ -1615,6 +1712,7 @@ void draw() {
     int i = 0;
     panelGlobal(i++);
     panelLevel(i++);
+    panelCosmetic(i++);
     panelPlayer(i++);
     panelBypass(i++);
     panelBot(i++);

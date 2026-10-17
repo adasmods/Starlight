@@ -195,6 +195,11 @@ class $modify(StarlightBaseLayer, GJBaseGameLayer) {
             }
         }
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
+
+        // dual clicks: one input drives both players in dual mode
+        if (cfg().dualClicks && inLevel && m_gameState.m_isDualMode && !bot::injecting()) {
+            GJBaseGameLayer::handleButton(down, button, !isPlayer1);
+        }
     }
 
     void shakeCamera(float duration, float strength, float interval) {
@@ -305,6 +310,11 @@ class $modify(StarlightPauseLayer, PauseLayer) {
     void onPracticeMode(CCObject* sender) {
         if (!cfg().confirmPractice || s_confirmed) return PauseLayer::onPracticeMode(sender);
         sl_confirm("Practice", "Enter practice mode?", "Practice", [sender](PauseLayer* p) { p->onPracticeMode(sender); });
+    }
+
+    void onQuit(CCObject* sender) {
+        if (!cfg().confirmExit || s_confirmed) return PauseLayer::onQuit(sender);
+        sl_confirm("Exit", "Leave the level?", "Exit", [sender](PauseLayer* p) { p->onQuit(sender); });
     }
 
     void onNormalMode(CCObject* sender) {

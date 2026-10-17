@@ -18,6 +18,9 @@ enum LabelId {
     LabelClock,
     LabelRunFrom,
     LabelBestRun,
+    LabelCustom1,
+    LabelCustom2,
+    LabelCustom3,
     kLabelCount,
 };
 
@@ -54,6 +57,25 @@ struct Config {
     bool noObjectGlow = false;
     bool unlockShop = false;
     bool botIgnoreInputs = true;
+    // GDH-style extras
+    bool noCircleEffects = false;
+    bool noExitDualEffect = false;
+    bool noNewBest = false;
+    bool hideAttempts = false;
+    bool hidePauseButton = false;
+    bool noSwingFire = false;
+    bool rainbowIcon = false;
+    float rainbowSpeed = 1.f;
+    bool trailAlwaysOn = false;
+    bool hideAchievements = false;
+    bool noShortNumbers = false;
+    bool noCameraZoom = false;
+    bool noCameraMove = false;
+    bool showTotalAttempts = false;
+    bool startposSwitcher = false;
+    bool dualClicks = false;
+    bool confirmExit = false;
+    std::string customLabels[3] = {"{fps} FPS  |  {cps} CPS", "Attempt {attempt}  -  {percent}%", "{level}"};
     bool showTrajectory = false;
     int trajectoryLength = 240;
     bool hitboxMultiplier = false;
@@ -171,6 +193,9 @@ struct Config {
     int stepKey = 0x46;     // F: frame stepper
     int teleportKey = 0;    // click teleport
     int recordKey = 0;      // start/stop recorder
+    int prevStartPosKey = 0x51; // Q
+    int nextStartPosKey = 0x45; // E
+    int editorUiKey = 0;
     int jumpKeys[3] = {0, 0, 0}; // extra P1 jump keys
     int p2JumpKey = 0;
     int leftKey = 0;  // platformer

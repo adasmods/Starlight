@@ -61,6 +61,13 @@ class $modify(StarlightPlayLayer, PlayLayer) {
         VisOverride trail[2];
         VisOverride wave[2];
         VisOverride robotFire[2];
+        VisOverride swingFire[2][3];
+        VisOverride attemptLabel;
+        VisOverride pauseButton;
+        bool rainbowWasOn = false;
+        ccColor3B savedColors[2][2];
+        bool trailForced = false;
+        float rainbowTime = 0.f;
         bool solidWaveOn = false;
         bool practiceApplied = false;
         bool instantDone = false;
@@ -297,6 +304,10 @@ class $modify(StarlightPlayLayer, PlayLayer) {
             m_fields->trail[i].apply(p->m_regularTrail, c.noTrail);
             m_fields->wave[i].apply(p->m_waveTrail, c.noWaveTrail);
             m_fields->robotFire[i].apply(p->m_robotFire, c.noRobotFire);
+            m_fields->swingFire[i][0].apply(p->m_swingFireTop, c.noSwingFire);
+            m_fields->swingFire[i][1].apply(p->m_swingFireMiddle, c.noSwingFire);
+            m_fields->swingFire[i][2].apply(p->m_swingFireBottom, c.noSwingFire);
+            if (c.trailAlwaysOn || m_fields->trailForced) p->m_alwaysShowStreak = c.trailAlwaysOn;
 
             if (p->m_waveTrail && (c.solidWaveTrail || m_fields->solidWaveOn)) {
                 p->m_waveTrail->m_isSolid = c.solidWaveTrail;
@@ -306,6 +317,53 @@ class $modify(StarlightPlayLayer, PlayLayer) {
             }
         }
         m_fields->solidWaveOn = c.solidWaveTrail;
+        m_fields->trailForced = c.trailAlwaysOn;
+
+        m_fields->attemptLabel.apply(m_attemptLabel, c.hideAttempts);
+        if (m_uiLayer) m_fields->pauseButton.apply(m_uiLayer->m_pauseBtn, c.hidePauseButton);
+
+        // rainbow icon: cycles both player colours, restores them when turned off
+        if (c.rainbowIcon) {
+            if (!m_fields->rainbowWasOn) {
+                for (int i = 0; i < 2; i++) {
+                    if (!players[i]) continue;
+                    m_fields->savedColors[i][0] = players[i]->m_playerColor1;
+                    m_fields->savedColors[i][1] = players[i]->m_playerColor2;
+                }
+            }
+            m_fields->rainbowTime += 1.f / 60.f * std::clamp(c.rainbowSpeed, 0.1f, 5.f);
+            for (int i = 0; i < 2; i++) {
+                if (!players[i]) continue;
+                float h = std::fmod(m_fields->rainbowTime * 0.25f + i * 0.5f, 1.f);
+                auto main = sl_hsv(h, 0.75f, 1.f), second = sl_hsv(std::fmod(h + 0.5f, 1.f), 0.75f, 1.f);
+                players[i]->setColor(main);
+                players[i]->setSecondColor(second);
+                if (players[i]->m_regularTrail) players[i]->m_regularTrail->setColor(main);
+                if (players[i]->m_waveTrail) players[i]->m_waveTrail->setColor(main);
+            }
+        } else if (m_fields->rainbowWasOn) {
+            for (int i = 0; i < 2; i++) {
+                if (!players[i]) continue;
+                players[i]->setColor(m_fields->savedColors[i][0]);
+                players[i]->setSecondColor(m_fields->savedColors[i][1]);
+            }
+        }
+        m_fields->rainbowWasOn = c.rainbowIcon;
+    }
+
+    static ccColor3B sl_hsv(float h, float s, float v) {
+        float r = 0, g = 0, b = 0;
+        float i = std::floor(h * 6.f), f = h * 6.f - i;
+        float p = v * (1.f - s), q = v * (1.f - f * s), t = v * (1.f - (1.f - f) * s);
+        switch (static_cast<int>(i) % 6) {
+            case 0: r = v, g = t, b = p; break;
+            case 1: r = q, g = v, b = p; break;
+            case 2: r = p, g = v, b = t; break;
+            case 3: r = p, g = q, b = v; break;
+            case 4: r = t, g = p, b = v; break;
+            default: r = v, g = p, b = q; break;
+        }
+        return {static_cast<GLubyte>(r * 255.f), static_cast<GLubyte>(g * 255.f), static_cast<GLubyte>(b * 255.f)};
     }
 
     void sl_updateHitboxes() {

@@ -1,5 +1,6 @@
 #include "Config.hpp"
 #include "State.hpp"
+#include "hacks/Extras.hpp"
 #include "recorder/Recorder.hpp"
 #include "ui/Menu.hpp"
 
@@ -96,6 +97,18 @@ $execute {
 
                 if (!press) return ListenerResult::Propagate;
 
+                if (c.startposSwitcher && PlayLayer::get()) {
+                    if (c.prevStartPosKey != 0 && key == c.prevStartPosKey && extras::cycleStartPos(-1)) return ListenerResult::Stop;
+                    if (c.nextStartPosKey != 0 && key == c.nextStartPosKey && extras::cycleStartPos(1)) return ListenerResult::Stop;
+                }
+                if (c.editorUiKey != 0 && key == c.editorUiKey) {
+                    if (auto editor = LevelEditorLayer::get(); editor && editor->m_editorUI) {
+                        static bool hidden = false;
+                        hidden = !hidden;
+                        editor->m_editorUI->showUI(!hidden);
+                        return ListenerResult::Stop;
+                    }
+                }
                 if (c.recordKey != 0 && key == c.recordKey) {
                     recorder::toggle();
                     return ListenerResult::Stop;

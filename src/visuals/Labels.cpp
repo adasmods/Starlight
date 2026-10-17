@@ -2,6 +2,7 @@
 
 #include "State.hpp"
 #include "Textures.hpp"
+#include "hacks/Extras.hpp"
 #include "ui/Menu.hpp"
 
 #include <algorithm>
@@ -94,13 +95,24 @@ char const* fontFile(int index) {
 
 char const* labelName(int id) {
     static char const* names[kLabelCount] = {"Cheat Indicator", "FPS",     "CPS",          "Noclip Accuracy", "Noclip Deaths",
-                                             "Attempt",         "Percent", "Session Time", "Clock",           "Run From",      "Best Run"};
+                                             "Attempt",         "Percent", "Session Time", "Clock",           "Run From",      "Best Run",
     return names[std::clamp(id, 0, kLabelCount - 1)];
 }
 
 char const* sampleText(int id) {
-    static char const* samples[kLabelCount] = {"o", "240 FPS", "8 CPS", "100.00%", "0 Deaths", "Attempt 1", "42.00%", "1:23", "21:37:00", "Run From 0%", "Best Run 0-42%"};
+    static char const* samples[kLabelCount] = {"o", "240 FPS", "8 CPS", "100.00%", "0 Deaths", "Attempt 1", "42.00%", "1:23", "21:37:00", "Run From 0%", "Best Run 0-42%", "", "", ""};
+    if (id >= LabelCustom1 && id <= LabelCustom3) return cfg().customLabels[id - LabelCustom1].c_str();
     return samples[std::clamp(id, 0, kLabelCount - 1)];
+}
+
+std::string expand(std::string text, std::vector<std::pair<std::string, std::string>> const& vars) {
+    for (auto const& [key, value] : vars) {
+        std::string token = "{" + key + "}";
+        for (size_t at = text.find(token); at != std::string::npos; at = text.find(token, at + value.size())) {
+            text.replace(at, token.size(), value);
+        }
+    }
+    return text;
 }
 
 void tick(float dt) {
@@ -248,6 +260,30 @@ void LabelsNode::refresh(float dt, PlayLayer* pl) {
     }
     texts[LabelRunFrom] = fmt::format("Run From {:.0f}%", st.runStart);
     texts[LabelBestRun] = fmt::format("Best Run {:.0f}-{:.0f}%", st.bestStart, st.bestEnd);
+
+    // custom labels: free text with {variables}
+    {
+        int spCount = extras::startPosCount(), spIndex = extras::startPosIndex();
+        std::string level = pl->m_level ? std::string(pl->m_level->m_levelName) : "";
+        int sessionSecs = static_cast<int>(st.sessionTime);
+        std::vector<std::pair<std::string, std::string>> vars = {
+            {"fps", fmt::format("{:.0f}", st.fps)},
+            {"cps", std::to_string(st.clicks.size())},
+            {"attempt", std::to_string(pl->m_attempts)},
+            {"total", pl->m_level ? std::to_string(pl->m_level->m_attempts.value()) : "0"},
+            {"percent", fmt::format("{:.2f}", pl->getCurrentPercent())},
+            {"deaths", std::to_string(st.noclipDeaths)},
+            {"accuracy", fmt::format("{:.2f}", st.noclipAccuracy())},
+            {"time", fmt::format("{}:{:02}", sessionSecs / 60, sessionSecs % 60)},
+            {"clock", texts[LabelClock]},
+            {"level", level},
+            {"best", fmt::format("{:.0f}-{:.0f}", st.bestStart, st.bestEnd)},
+            {"runfrom", fmt::format("{:.0f}", st.runStart)},
+            {"startpos", spCount == 0 ? std::string("-") : spIndex < 0 ? fmt::format("0/{}", spCount) : fmt::format("{}/{}", spIndex + 1, spCount)},
+            {"speed", fmt::format("{:.2f}", cfg().speedhack ? cfg().speed : 1.f)},
+        };
+        for (int i = 0; i < 3; i++) texts[LabelCustom1 + i] = labels::expand(c.customLabels[i], vars);
+    }
 
     // ---- layout + style
     float opacity = std::clamp(c.labelOpacity, 0.f, 1.f);
