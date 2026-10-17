@@ -18,6 +18,14 @@ jobs:
         uses: geode-sdk/build-geode-mod@main
         id: build
 
+      # On failure, rebuild and publish compiler errors as annotations (readable without signing in)
+      - name: Report compile errors
+        if: failure()
+        shell: bash
+        run: |
+          cmake --build build --config Release -- -k 0 2>&1 | tee build.log || true
+          grep -E "error:|error [A-Z]+[0-9]+" build.log | sort -u | head -n 40 | while IFS= read -r line; do echo "::error::${line}"; done
+
       - uses: actions/upload-artifact@v4
         with:
           name: Starlight
