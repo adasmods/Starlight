@@ -17,6 +17,7 @@
 #include <Geode/modify/GameManager.hpp>
 #include <Geode/modify/GameStatsManager.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/modify/LevelInfoLayer.hpp>
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/modify/PlayerObject.hpp>
 
@@ -243,6 +244,19 @@ class $modify(StarlightPlayerObject, PlayerObject) {
     }
 };
 
+// ---------------------------------------------------------------- copy hack
+// Skips the copy password check: the clone button goes straight to the copy confirmation.
+
+class $modify(StarlightLevelInfo, LevelInfoLayer) {
+    void tryCloneLevel(CCObject* sender) {
+        if (cfg().copyHack) {
+            LevelInfoLayer::confirmClone(sender);
+            return;
+        }
+        LevelInfoLayer::tryCloneLevel(sender);
+    }
+};
+
 // ---------------------------------------------------------------- editor
 
 class $modify(StarlightEditorUI, EditorUI) {
@@ -280,9 +294,30 @@ class $modify(StarlightNickLabel, CCLabelBMFont) {
 static bool s_confirmed = false;
 
 class $modify(StarlightPauseLayer, PauseLayer) {
+    // Level Edit: the pause menu of an online level gets the edit button
+    // (the level counts as a local one only while the menu is built / Edit is pressed)
+    static GJGameLevel* sl_currentLevel() {
+        auto pl = PlayLayer::get();
+        return pl ? pl->m_level : nullptr;
+    }
+
     void customSetup() {
+        auto level = sl_currentLevel();
+        bool swap = cfg().levelEdit && level && level->m_levelType != GJLevelType::Editor;
+        auto oldType = level ? level->m_levelType : GJLevelType::Default;
+        if (swap) level->m_levelType = GJLevelType::Editor;
         PauseLayer::customSetup();
+        if (swap) level->m_levelType = oldType;
         if (cfg().hidePauseMenu) this->setVisible(false);
+    }
+
+    void onEdit(CCObject* sender) {
+        auto level = sl_currentLevel();
+        bool swap = cfg().levelEdit && level && level->m_levelType != GJLevelType::Editor;
+        auto oldType = level ? level->m_levelType : GJLevelType::Default;
+        if (swap) level->m_levelType = GJLevelType::Editor;
+        PauseLayer::onEdit(sender);
+        if (swap && level) level->m_levelType = oldType;
     }
 
     // shows a confirm popup and re-runs `action` on "yes"

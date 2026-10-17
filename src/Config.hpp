@@ -75,6 +75,8 @@ struct Config {
     bool startposSwitcher = false;
     bool dualClicks = false;
     bool confirmExit = false;
+    bool copyHack = false;
+    bool levelEdit = false;
     std::string customLabels[3] = {"{fps} FPS  |  {cps} CPS", "Attempt {attempt}  -  {percent}%", "{level}"};
     bool showTrajectory = false;
     int trajectoryLength = 240;

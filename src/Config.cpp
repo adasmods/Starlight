@@ -57,6 +57,8 @@ static void visit(Config& c, F&& f) {
     f("startpos-switcher", c.startposSwitcher);
     f("dual-clicks", c.dualClicks);
     f("confirm-exit", c.confirmExit);
+    f("copy-hack", c.copyHack);
+    f("level-edit", c.levelEdit);
     f("custom-labels", c.customLabels);
     f("show-trajectory", c.showTrajectory);
     f("trajectory-length", c.trajectoryLength);

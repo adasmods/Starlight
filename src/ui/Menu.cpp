@@ -269,7 +269,7 @@ struct PanelDef {
 
 constexpr PanelDef kPanels[] = {
     {"global", "Global", 9},     {"level", "Level", 32},        {"cosmetic", "Cosmetic", 13},
-    {"player", "Player", 17},    {"bypass", "Bypass", 6},       {"bot", "Bot", 10},
+    {"player", "Player", 17},    {"bypass", "Bypass", 8},       {"bot", "Bot", 10},
     {"recorder", "Recorder", 8}, {"discord", "Discord", 5},     {"visuals", "Visuals", 14},
     {"labels", "Labels", 19},    {"keybinds", "Keybinds", 14},  {"interface", "Interface", 9},
     {"shortcuts", "Shortcuts", 14},
@@ -1217,6 +1217,8 @@ void panelBypass(int idx) {
         toggle("Character Filter Bypass", &c.charFilterBypass, "Allows any character in text inputs.");
         toggle("Free Scroll", &c.freeScroll, "Scroll anywhere in the editor, no limits.");
         toggle("Unlock Shop Items", &c.unlockShop, "Shop items count as bought (client-side only).");
+        toggle("Copy Hack", &c.copyHack, "Copy any online level to your local levels, without the password.");
+        toggle("Level Edit", &c.levelEdit, "Shows the Edit button in the pause menu of online levels.");
     }
 }
 
